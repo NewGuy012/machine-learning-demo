@@ -9,6 +9,8 @@ Topics include
 -   Model evaluation and refinement (in progress)
 -   Building pipelines (in progress)
 
+The material was inspired by the book "Introduction to Machine Learning with Python" by Andreas Mueller and Sarah Guido.
+
 ## Python Packages Used
 
 -   scikit-learn
