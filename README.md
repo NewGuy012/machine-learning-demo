@@ -5,9 +5,17 @@ A demo to showcase commonly machine learning techniques and workflows.
 Topics include
 
 -   Supervised learning
--   Unsupervised learning (in progress)
--   Model evaluation and refinement (in progress)
--   Building pipelines (in progress)
+-   Unsupervised learning
+-   Model evaluation and refinement
+-   Building pipelines
+
+## Python Packages Used
+
+-   scikit-learn
+-   pandas
+-   numpy
+-   scipy
+-   matplotlib
 
 ## Notes
 
@@ -33,27 +41,21 @@ Topics include
     -   Clustering
 
 -   Common Unsupervised learning algorithms
-    - Principal component analysis
-    - Non-negative matrix factorization
-    - t-SNE
-    - k-Means clustering
-    - Agglomerative clustering
-    - DBSCAN
+
+    -   Principal component analysis
+    -   Non-negative matrix factorization
+    -   t-SNE
+    -   k-Means clustering
+    -   Agglomerative clustering
+    -   DBSCAN
+
+-   Evaluating generalization performance
+
+    -   Cross-validation
+    -   Grid search
+    -   Imbalanced datasets
 
 -   Pros and cons of each algorithm (in progress)
-
-- Evaluating generalization performance
-    - Cross-validation
-    - Grid search
-    - Imbalanced datasets
-
-## Python Packages Used
-
--   scikit-learn
--   pandas
--   numpy
--   scipy
--   matplotlib
 
 ## Credits
 
