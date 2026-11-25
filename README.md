@@ -152,8 +152,10 @@ machine-learning-demo/
 ├── scripts/
 │   ├── build_site.py                    # Exports all notebooks via `marimo export html-wasm`
 │   └── generate_assets.py               # Regenerates static README visuals in assets/
+├── tests/
+│   └── test_smoke.py                    # Minimal zero-dependency unittest smoke & integrity checks
 ├── .python-version                      # Pins Python 3.15 for uv
-├── pyproject.toml                       # Project dependencies, dev group & Ruff settings
+├── pyproject.toml                       # Project dependencies, dev/assets groups & Ruff settings
 ├── uv.lock                              # Deterministic lockfile
 ├── LICENSE                              # BSD 3-Clause License
 └── README.md
@@ -162,11 +164,12 @@ machine-learning-demo/
 Common developer checks (all powered by `uv`):
 
 ```bash
-uv run marimo check --strict notebooks/*.py   # Validate Marimo DAGs & formatting
-uvx ruff check . && uvx ruff format --check . # Lint & style checks
-uv run python scripts/build_site.py           # Build static WASM site locally into _site/
-uv run python -m http.server -d _site         # Preview the built WASM site locally
-uv run python scripts/generate_assets.py      # Regenerate README preview PNGs
+uv run marimo check --strict notebooks/*.py       # Validate Marimo DAGs & formatting
+uv run ruff check . && uv run ruff format --check . # Lint & style checks (locked Ruff)
+uv run python -m unittest discover -s tests -v    # Run minimal smoke & integrity tests
+uv run python scripts/build_site.py               # Build static WASM site locally into _site/
+uv run python -m http.server -d _site             # Preview the built WASM site locally
+uv run --group assets python scripts/generate_assets.py  # Regenerate README preview PNGs
 ```
 
 ---
@@ -174,5 +177,5 @@ uv run python scripts/generate_assets.py      # Regenerate README preview PNGs
 ## Credits & License
 
 - **Pedagogical Inspiration:** Adapted and expanded from [*Introduction to Machine Learning with Python*](https://www.oreilly.com/library/view/introduction-to-machine/9781449369880/) by **Andreas C. Müller** and **Sarah Guido**.
-- **Built With:** [Marimo](https://marimo.io/), [scikit-learn](https://scikit-learn.org/), [Plotly](https://plotly.com/python/), [NumPy](https://numpy.org/), [pandas](https://pandas.pydata.org/), [SciPy](https://scipy.org/), and [uv](https://docs.astral.sh/uv/).
+- **Built With:** [Marimo](https://marimo.io/), [scikit-learn](https://scikit-learn.org/), [Plotly](https://plotly.com/python/), [NumPy](https://numpy.org/), [SciPy](https://scipy.org/), and [uv](https://docs.astral.sh/uv/).
 - **License:** Distributed under the [BSD 3-Clause License](LICENSE).
