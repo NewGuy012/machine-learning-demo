@@ -199,8 +199,8 @@ def _(
         _steps.append(("svc", SVC(C=100)))
         _short_args.append("SVC(C=100)")
     elif pipe_estimator.value == "LogisticRegression":
-        _steps.append(("logreg", LogisticRegression(max_iter=1500)))
-        _short_args.append("LogisticRegression(max_iter=1500)")
+        _steps.append(("logreg", LogisticRegression(solver="liblinear", max_iter=1000)))
+        _short_args.append('LogisticRegression(solver="liblinear", max_iter=1000)')
     elif pipe_estimator.value == "RandomForestClassifier":
         _steps.append(("rf", RandomForestClassifier(n_estimators=60, random_state=42)))
         _short_args.append("RandomForestClassifier(n_estimators=60)")
@@ -476,7 +476,7 @@ def _(
         _param_grid = [
             {
                 "preprocessing": [StandardScaler(), MinMaxScaler(), "passthrough"],
-                "classifier": [LogisticRegression(max_iter=2000)],
+                "classifier": [LogisticRegression(solver="liblinear", max_iter=1000)],
                 "classifier__C": [0.1, 1.0, 10.0],
             },
             {
