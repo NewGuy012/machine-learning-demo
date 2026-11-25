@@ -3,29 +3,21 @@
 # dependencies = [
 #     "marimo",
 #     "numpy",
-#     "pandas",
 #     "plotly",
 #     "scikit-learn",
-#     "scipy",
 # ]
 # ///
 
 import marimo
 
 __generated_with = "0.26.0"
-app = marimo.App(
-    width="medium",
-    app_title="03 · Model Evaluation & Refinement",
-)
+app = marimo.App(width="medium", app_title="03 · Model Evaluation & Refinement")
 
-
-@app.cell
-def _():
+with app.setup:
     import functools
 
     import marimo as mo
     import numpy as np
-    import pandas as pd
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from sklearn.datasets import load_breast_cancer, load_digits, load_iris
@@ -57,44 +49,134 @@ def _():
     from sklearn.svm import SVC
     from sklearn.tree import DecisionTreeClassifier
 
+
+@app.function
+def style_fig(fig, title: str, height: int = 430):
+    fig.update_layout(
+        template="plotly_white",
+        title={"text": title, "font": {"size": 15}},
+        height=height,
+        margin={"l": 55, "r": 25, "t": 60, "b": 50},
+        paper_bgcolor="white",
+        plot_bgcolor="#F8FAFC",
+        font={"color": "#0F172A"},
+    )
+    return fig
+
+
+@app.function
+def clf_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, float, float, float]:
     return (
-        DecisionTreeClassifier,
-        DummyClassifier,
-        GridSearchCV,
-        KFold,
-        LogisticRegression,
-        RandomForestClassifier,
-        SVC,
-        ShuffleSplit,
-        StandardScaler,
-        StratifiedKFold,
-        average_precision_score,
-        confusion_matrix,
-        cross_val_score,
-        f1_score,
-        functools,
-        go,
-        learning_curve,
-        load_breast_cancer,
-        load_digits,
-        load_iris,
-        make_pipeline,
-        make_subplots,
-        mo,
-        np,
-        pd,
-        precision_recall_curve,
-        precision_score,
-        recall_score,
-        roc_auc_score,
-        roc_curve,
-        train_test_split,
-        validation_curve,
+        float(np.mean(y_pred == y_true)),
+        float(precision_score(y_true, y_pred, zero_division=0)),
+        float(recall_score(y_true, y_pred, zero_division=0)),
+        float(f1_score(y_true, y_pred, zero_division=0)),
     )
 
 
+@app.function
+@functools.lru_cache(maxsize=4)
+def run_learning_curve(model_name: str):
+    cancer = load_breast_cancer()
+    if model_name == "LogisticRegression":
+        est = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=1000))
+    elif model_name == "DecisionTreeClassifier":
+        est = DecisionTreeClassifier(random_state=42)
+    else:
+        est = make_pipeline(StandardScaler(), SVC(kernel="rbf", C=1.0))
+    sizes, tr_s, cv_s = learning_curve(
+        est,
+        cancer.data,
+        cancer.target,
+        cv=StratifiedKFold(n_splits=5),
+        train_sizes=np.linspace(0.15, 1.0, 8),
+    )
+    return sizes, tr_s.mean(axis=1), cv_s.mean(axis=1), cv_s.std(axis=1)
+
+
+@app.function
+@functools.lru_cache(maxsize=1)
+def get_cancer_split():
+    cancer = load_breast_cancer()
+    return train_test_split(
+        cancer.data, cancer.target, stratify=cancer.target, test_size=0.25, random_state=42
+    )
+
+
+@app.function
+@functools.lru_cache(maxsize=9)
+def run_validation_curve(est_name: str, cv_folds: int):
+    X_tr, _, y_tr, _ = get_cancer_split()
+    cv = StratifiedKFold(n_splits=cv_folds)
+    if est_name == "SVC (RBF)":
+        pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf", gamma="scale"))
+        param_name = "svc__C"
+        param_range = np.logspace(-3, 3, 7)
+        x_labels = [f"{v:g}" for v in param_range]
+    elif est_name == "LogisticRegression":
+        pipe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1500))
+        param_name = "logisticregression__C"
+        param_range = np.logspace(-3, 3, 7)
+        x_labels = [f"{v:g}" for v in param_range]
+    else:
+        pipe = RandomForestClassifier(n_estimators=50, random_state=42)
+        param_name = "max_depth"
+        param_range = np.array([1, 2, 3, 4, 6, 8, 12])
+        x_labels = [str(v) for v in param_range]
+
+    tr_s, cv_s = validation_curve(
+        pipe, X_tr, y_tr, param_name=param_name, param_range=param_range, cv=cv
+    )
+    return (
+        param_name,
+        x_labels,
+        tr_s.mean(axis=1),
+        tr_s.std(axis=1),
+        cv_s.mean(axis=1),
+        cv_s.std(axis=1),
+    )
+
+
+@app.function
+@functools.lru_cache(maxsize=3)
+def run_svc_grid(cv_folds: int):
+    X_tr, X_te, y_tr, y_te = get_cancer_split()
+    c_vals = [0.01, 0.1, 1.0, 10.0, 100.0]
+    g_vals = [0.0001, 0.001, 0.01, 0.1, 1.0]
+    grid = GridSearchCV(
+        make_pipeline(StandardScaler(), SVC(kernel="rbf")),
+        param_grid={"svc__C": c_vals, "svc__gamma": g_vals},
+        cv=StratifiedKFold(n_splits=cv_folds),
+    ).fit(X_tr, y_tr)
+    scores = grid.cv_results_["mean_test_score"].reshape(len(c_vals), len(g_vals))
+    return (
+        c_vals,
+        g_vals,
+        scores,
+        float(grid.best_score_),
+        float(grid.score(X_te, y_te)),
+        grid.best_params_,
+    )
+
+
+@app.function
+@functools.lru_cache(maxsize=8)
+def fit_digits_binary(c_val: float, balanced: bool):
+    digits = load_digits()
+    y_bin = (digits.target == 9).astype(int)
+    X_tr, X_te, y_tr, y_te, _, orig_te = train_test_split(
+        digits.data, y_bin, digits.target, random_state=0
+    )
+    dum_pred = DummyClassifier(strategy="most_frequent").fit(X_tr, y_tr).predict(X_te)
+    pipe = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(C=c_val, class_weight="balanced" if balanced else None, max_iter=1500),
+    ).fit(X_tr, y_tr)
+    return X_te, y_te, orig_te, dum_pred, pipe.predict_proba(X_te)[:, 1]
+
+
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     # 03 · Model Evaluation, Cross-Validation & Imbalanced Metrics
 
@@ -108,22 +190,8 @@ def _(mo):
     """)
 
 
-@app.function
-def style_fig(fig, title: str, height: int = 430):
-    fig.update_layout(
-        template="plotly_white",
-        title=dict(text=title, font=dict(size=15)),
-        height=height,
-        margin=dict(l=55, r=25, t=60, b=50),
-        paper_bgcolor="white",
-        plot_bgcolor="#F8FAFC",
-        font=dict(color="#0F172A"),
-    )
-    return fig
-
-
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 1 · Cross-Validation Visualizer (`Iris`) & Learning Curves
@@ -133,7 +201,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     cv_strategy = mo.ui.radio(
         options=[
             "KFold (unshuffled)",
@@ -170,27 +238,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    DecisionTreeClassifier,
-    KFold,
-    LogisticRegression,
-    SVC,
-    ShuffleSplit,
-    StandardScaler,
-    StratifiedKFold,
-    cross_val_score,
-    cv_splits,
-    cv_strategy,
-    go,
-    lc_model,
-    learning_curve,
-    load_breast_cancer,
-    load_iris,
-    make_pipeline,
-    make_subplots,
-    mo,
-    np,
-):
+def _(cv_splits, cv_strategy, lc_model):
     _iris = load_iris()
     _k = int(cv_splits.value)
     _strat = cv_strategy.value
@@ -207,12 +255,11 @@ def _(
     _pipe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
     _scores = cross_val_score(_pipe, _iris.data, _iris.target, cv=_cv)
 
-    # Build fold assignment matrix: rows = [Fold 1..k], plus separate row for true class labels
-    _n = len(_iris.target)
-    _split_mat = np.zeros((_k, _n))
+    _split_mat = np.zeros((_k, len(_iris.target)))
     for _fi, (_, _val_idx) in enumerate(_cv.split(_iris.data, _iris.target)):
         _split_mat[_fi, _val_idx] = 1
 
+    _fold_labels = [f"Fold {i + 1}" for i in range(_k)]
     _fig = make_subplots(
         rows=2,
         cols=2,
@@ -227,7 +274,6 @@ def _(
         vertical_spacing=0.12,
         horizontal_spacing=0.08,
     )
-
     _fig.add_trace(
         go.Heatmap(
             z=[_iris.target],
@@ -244,7 +290,7 @@ def _(
     _fig.add_trace(
         go.Heatmap(
             z=_split_mat,
-            y=[f"Fold {i + 1}" for i in range(_k)],
+            y=_fold_labels,
             colorscale=[[0.0, "#DBEAFE"], [1.0, "#EA580C"]],
             zmin=0,
             zmax=1,
@@ -256,7 +302,7 @@ def _(
     )
     _fig.add_trace(
         go.Bar(
-            x=[f"Fold {i + 1}" for i in range(_k)],
+            x=_fold_labels,
             y=_scores,
             marker_color=["#DC2626" if s < 0.5 else "#2563EB" for s in _scores],
             text=[f"{s:.1%}" for s in _scores],
@@ -279,25 +325,7 @@ def _(
     _fig.update_yaxes(title_text="Accuracy", range=[0, 1.12], row=1, col=2)
     style_fig(_fig, f"Cross-Validation Anatomy: {_strat} (n_splits={_k})", height=430)
 
-    # Learning curve on Breast Cancer
-    _cancer = load_breast_cancer()
-    if lc_model.value == "LogisticRegression":
-        _lc_est = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=1000))
-    elif lc_model.value == "DecisionTreeClassifier":
-        _lc_est = DecisionTreeClassifier(random_state=42)
-    else:
-        _lc_est = make_pipeline(StandardScaler(), SVC(kernel="rbf", C=1.0))
-
-    _sizes, _tr_s, _cv_s = learning_curve(
-        _lc_est,
-        _cancer.data,
-        _cancer.target,
-        cv=StratifiedKFold(n_splits=5),
-        train_sizes=np.linspace(0.15, 1.0, 8),
-    )
-    _tr_mean, _tr_std = _tr_s.mean(axis=1), _tr_s.std(axis=1)
-    _cv_mean, _cv_std = _cv_s.mean(axis=1), _cv_s.std(axis=1)
-
+    _sizes, _tr_mean, _cv_mean, _cv_std = run_learning_curve(lc_model.value)
     _lc_fig = go.Figure()
     _lc_fig.add_trace(
         go.Scatter(
@@ -305,29 +333,24 @@ def _(
             y=np.concatenate([_cv_mean + _cv_std, (_cv_mean - _cv_std)[::-1]]),
             fill="toself",
             fillcolor="rgba(234, 88, 12, 0.14)",
-            line=dict(color="rgba(0,0,0,0)"),
+            line={"color": "rgba(0,0,0,0)"},
             name="CV ±1 std",
             hoverinfo="skip",
         )
     )
-    _lc_fig.add_trace(
-        go.Scatter(
-            x=_sizes,
-            y=_tr_mean,
-            mode="lines+markers",
-            name="Train Score",
-            line=dict(color="#2563EB", width=2.5),
+    for _name, _vals, _color in [
+        ("Train Score", _tr_mean, "#2563EB"),
+        ("5-Fold CV Score", _cv_mean, "#EA580C"),
+    ]:
+        _lc_fig.add_trace(
+            go.Scatter(
+                x=_sizes,
+                y=_vals,
+                mode="lines+markers",
+                name=_name,
+                line={"color": _color, "width": 2.5},
+            )
         )
-    )
-    _lc_fig.add_trace(
-        go.Scatter(
-            x=_sizes,
-            y=_cv_mean,
-            mode="lines+markers",
-            name="5-Fold CV Score",
-            line=dict(color="#EA580C", width=2.5),
-        )
-    )
     _lc_fig.update_xaxes(title_text="Training Set Size (Samples)")
     _lc_fig.update_yaxes(title_text="Accuracy", range=[0.75, 1.03])
     style_fig(_lc_fig, f"Learning Curve on Breast Cancer ({lc_model.value})", height=370)
@@ -363,7 +386,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 2 · Validation Curves, Grid Search & The 3-Way Split
@@ -373,81 +396,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    GridSearchCV,
-    LogisticRegression,
-    RandomForestClassifier,
-    SVC,
-    StandardScaler,
-    StratifiedKFold,
-    functools,
-    load_breast_cancer,
-    make_pipeline,
-    mo,
-    np,
-    train_test_split,
-    validation_curve,
-):
-    @functools.lru_cache(maxsize=6)
-    def run_validation_and_grid(est_name: str, cv_folds: int):
-        _cancer = load_breast_cancer()
-        _X_tr, _X_te, _y_tr, _y_te = train_test_split(
-            _cancer.data, _cancer.target, stratify=_cancer.target, test_size=0.25, random_state=42
-        )
-        _cv = StratifiedKFold(n_splits=cv_folds)
-
-        if est_name == "SVC (RBF)":
-            _pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf", gamma="scale"))
-            _param_name = "svc__C"
-            _param_range = np.logspace(-3, 3, 7)
-            _x_labels = [f"{v:g}" for v in _param_range]
-        elif est_name == "LogisticRegression":
-            _pipe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1500))
-            _param_name = "logisticregression__C"
-            _param_range = np.logspace(-3, 3, 7)
-            _x_labels = [f"{v:g}" for v in _param_range]
-        else:
-            _pipe = RandomForestClassifier(n_estimators=50, random_state=42)
-            _param_name = "max_depth"
-            _param_range = np.array([1, 2, 3, 4, 6, 8, 12])
-            _x_labels = [str(v) for v in _param_range]
-
-        _tr_s, _cv_s = validation_curve(
-            _pipe,
-            _X_tr,
-            _y_tr,
-            param_name=_param_name,
-            param_range=_param_range,
-            cv=_cv,
-        )
-
-        # Cached 2D SVC GridSearch landscape on Train+Val
-        _svc_pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf"))
-        _c_vals = [0.01, 0.1, 1.0, 10.0, 100.0]
-        _g_vals = [0.0001, 0.001, 0.01, 0.1, 1.0]
-        _grid = GridSearchCV(
-            _svc_pipe,
-            param_grid={"svc__C": _c_vals, "svc__gamma": _g_vals},
-            cv=_cv,
-        ).fit(_X_tr, _y_tr)
-        _grid_scores = _grid.cv_results_["mean_test_score"].reshape(len(_c_vals), len(_g_vals))
-        _test_score = float(_grid.score(_X_te, _y_te))
-
-        return (
-            _param_name,
-            _x_labels,
-            _tr_s.mean(axis=1),
-            _tr_s.std(axis=1),
-            _cv_s.mean(axis=1),
-            _cv_s.std(axis=1),
-            _c_vals,
-            _g_vals,
-            _grid_scores,
-            float(_grid.best_score_),
-            _test_score,
-            _grid.best_params_,
-        )
-
+def _():
     vc_est = mo.ui.radio(
         options=["SVC (RBF)", "LogisticRegression", "RandomForestClassifier"],
         value="SVC (RBF)",
@@ -471,25 +420,14 @@ def _(
         ),
         kind="info",
     )
-    return run_validation_and_grid, vc_est, vc_folds
+    return vc_est, vc_folds
 
 
 @app.cell
-def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
-    (
-        _pname,
-        _x_labels,
-        _tr_m,
-        _tr_s,
-        _cv_m,
-        _cv_s,
-        _c_vals,
-        _g_vals,
-        _grid_scores,
-        _best_cv,
-        _test_score,
-        _best_params,
-    ) = run_validation_and_grid(vc_est.value, int(vc_folds.value))
+def _(vc_est, vc_folds):
+    _folds = int(vc_folds.value)
+    _pname, _x_labels, _tr_m, _tr_s, _cv_m, _cv_s = run_validation_curve(vc_est.value, _folds)
+    _c_vals, _g_vals, _grid_scores, _best_cv, _test_score, _best_params = run_svc_grid(_folds)
 
     _fig = make_subplots(
         rows=1,
@@ -501,35 +439,25 @@ def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
         ],
         horizontal_spacing=0.12,
     )
-    _fig.add_trace(
-        go.Scatter(
-            x=_x_labels,
-            y=_tr_m,
-            mode="lines+markers",
-            name="Train Accuracy",
-            line=dict(color="#2563EB", width=2.5),
-            error_y=dict(type="data", array=_tr_s, visible=True, thickness=1.2),
-        ),
-        row=1,
-        col=1,
-    )
-    _fig.add_trace(
-        go.Scatter(
-            x=_x_labels,
-            y=_cv_m,
-            mode="lines+markers",
-            name="CV Accuracy",
-            line=dict(color="#EA580C", width=2.5),
-            error_y=dict(type="data", array=_cv_s, visible=True, thickness=1.2),
-        ),
-        row=1,
-        col=1,
-    )
+    for _name, _m, _s, _color in [
+        ("Train Accuracy", _tr_m, _tr_s, "#2563EB"),
+        ("CV Accuracy", _cv_m, _cv_s, "#EA580C"),
+    ]:
+        _fig.add_trace(
+            go.Scatter(
+                x=_x_labels,
+                y=_m,
+                mode="lines+markers",
+                name=_name,
+                line={"color": _color, "width": 2.5},
+                error_y={"type": "data", "array": _s, "visible": True, "thickness": 1.2},
+            ),
+            row=1,
+            col=1,
+        )
     _fig.update_xaxes(title_text=_pname, row=1, col=1)
     _fig.update_yaxes(title_text="Accuracy", range=[0.55, 1.03], row=1, col=1)
 
-    _c_lbls = [f"{c:g}" for c in _c_vals]
-    _g_lbls = [f"{g:g}" for g in _g_vals]
     _best_r = _c_vals.index(_best_params["svc__C"])
     _best_c = _g_vals.index(_best_params["svc__gamma"])
     _hm_text = [
@@ -544,12 +472,12 @@ def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
     _fig.add_trace(
         go.Heatmap(
             z=_grid_scores,
-            x=_g_lbls,
-            y=_c_lbls,
+            x=[f"{g:g}" for g in _g_vals],
+            y=[f"{c:g}" for c in _c_vals],
             colorscale="Viridis",
             text=_hm_text,
             texttemplate="%{text}",
-            colorbar=dict(title="Mean CV"),
+            colorbar={"title": "Mean CV"},
         ),
         row=1,
         col=2,
@@ -560,7 +488,7 @@ def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
         x1=_best_c + 0.48,
         y0=_best_r - 0.48,
         y1=_best_r + 0.48,
-        line=dict(color="#0F172A", width=3),
+        line={"color": "#0F172A", "width": 3},
         row=1,
         col=2,
     )
@@ -585,7 +513,7 @@ def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 3 · Imbalanced Datasets, Accuracy Paradox & Threshold Tuning (`digits == 9`)
@@ -597,7 +525,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     imb_threshold = mo.ui.slider(
         start=0.05,
         stop=0.95,
@@ -629,61 +557,22 @@ def _(mo):
 
 
 @app.cell
-def _(
-    DummyClassifier,
-    LogisticRegression,
-    StandardScaler,
-    average_precision_score,
-    confusion_matrix,
-    f1_score,
-    go,
-    imb_balanced,
-    imb_c,
-    imb_threshold,
-    load_digits,
-    make_pipeline,
-    make_subplots,
-    mo,
-    np,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-    roc_curve,
-    train_test_split,
-):
-    _digits = load_digits()
-    _y_bin = (_digits.target == 9).astype(int)
-    _X_tr, _X_te, _y_tr, _y_te, _, _orig_te = train_test_split(
-        _digits.data, _y_bin, _digits.target, random_state=0
+def _(imb_balanced, imb_c, imb_threshold):
+    _X_te, _y_te, _orig_te, _dum_pred, _probs = fit_digits_binary(
+        float(imb_c.value), bool(imb_balanced.value)
     )
-
-    _dummy = DummyClassifier(strategy="most_frequent").fit(_X_tr, _y_tr)
-    _dum_pred = _dummy.predict(_X_te)
-
-    _cw = "balanced" if imb_balanced.value else None
-    _pipe = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(C=float(imb_c.value), class_weight=_cw, max_iter=1500),
-    ).fit(_X_tr, _y_tr)
-    _probs = _pipe.predict_proba(_X_te)[:, 1]
     _thr = float(imb_threshold.value)
     _pred = (_probs >= _thr).astype(int)
 
-    _acc = float(np.mean(_pred == _y_te))
-    _prec = float(precision_score(_y_te, _pred, zero_division=0))
-    _rec = float(recall_score(_y_te, _pred, zero_division=0))
-    _f1 = float(f1_score(_y_te, _pred, zero_division=0))
+    _acc, _prec, _rec, _f1 = clf_metrics(_y_te, _pred)
+    _dum_scores = list(clf_metrics(_y_te, _dum_pred))
+    _lr_scores = [_acc, _prec, _rec, _f1]
 
-    _cm = confusion_matrix(_y_te, _pred)
+    _cm = confusion_matrix(_y_te, _pred, labels=[0, 1])
     _tn, _fp, _fn, _tp = _cm.ravel()
-    _spec = float(_tn / (_tn + _fp)) if (_tn + _fp) > 0 else 0.0
-
-    # Dummy vs LogisticRegression metric bars + Confusion Matrix
-    _dum_acc = float(np.mean(_dum_pred == _y_te))
-    _dum_prec = float(precision_score(_y_te, _dum_pred, zero_division=0))
-    _dum_rec = float(recall_score(_y_te, _dum_pred, zero_division=0))
-    _dum_f1 = float(f1_score(_y_te, _dum_pred, zero_division=0))
+    _neg_total = max(int(_tn + _fp), 1)
+    _pos_total = max(int(_fn + _tp), 1)
+    _spec = float(_tn / _neg_total)
 
     _fig_top = make_subplots(
         rows=1,
@@ -696,35 +585,27 @@ def _(
         horizontal_spacing=0.14,
     )
     _metrics = ["Accuracy", "Precision", "Recall", "F1 Score"]
-    _fig_top.add_trace(
-        go.Bar(
-            name="Dummy (Always 'Not 9')",
-            x=_metrics,
-            y=[_dum_acc, _dum_prec, _dum_rec, _dum_f1],
-            marker_color="#94A3B8",
-            text=[f"{v:.2f}" for v in [_dum_acc, _dum_prec, _dum_rec, _dum_f1]],
-            textposition="outside",
-        ),
-        row=1,
-        col=1,
-    )
-    _fig_top.add_trace(
-        go.Bar(
-            name=f"LogReg (thr={_thr:.2f})",
-            x=_metrics,
-            y=[_acc, _prec, _rec, _f1],
-            marker_color="#2563EB",
-            text=[f"{v:.2f}" for v in [_acc, _prec, _rec, _f1]],
-            textposition="outside",
-        ),
-        row=1,
-        col=1,
-    )
+    for _bar_name, _vals, _color in [
+        ("Dummy (Always 'Not 9')", _dum_scores, "#94A3B8"),
+        (f"LogReg (thr={_thr:.2f})", _lr_scores, "#2563EB"),
+    ]:
+        _fig_top.add_trace(
+            go.Bar(
+                name=_bar_name,
+                x=_metrics,
+                y=_vals,
+                marker_color=_color,
+                text=[f"{v:.2f}" for v in _vals],
+                textposition="outside",
+            ),
+            row=1,
+            col=1,
+        )
     _fig_top.update_yaxes(range=[0, 1.15], title_text="Score", row=1, col=1)
 
     _cm_labels = [
-        [f"TN = {_tn}<br>({_tn / (_tn + _fp):.1%})", f"FP = {_fp}<br>({_fp / (_tn + _fp):.1%})"],
-        [f"FN = {_fn}<br>({_fn / (_fn + _tp):.1%})", f"TP = {_tp}<br>({_tp / (_fn + _tp):.1%})"],
+        [f"TN = {_tn}<br>({_tn / _neg_total:.1%})", f"FP = {_fp}<br>({_fp / _neg_total:.1%})"],
+        [f"FN = {_fn}<br>({_fn / _pos_total:.1%})", f"TP = {_tp}<br>({_tp / _pos_total:.1%})"],
     ]
     _fig_top.add_trace(
         go.Heatmap(
@@ -743,14 +624,17 @@ def _(
     _fig_top.update_layout(barmode="group")
     style_fig(_fig_top, "Imbalanced Evaluation: Why Accuracy Alone Hides Failure", height=390)
 
-    # Synced ROC and Precision-Recall Curves
     _fpr, _tpr, _ = roc_curve(_y_te, _probs)
     _roc_auc = float(roc_auc_score(_y_te, _probs))
     _pr_p, _pr_r, _ = precision_recall_curve(_y_te, _probs)
     _ap = float(average_precision_score(_y_te, _probs))
-
-    _cur_fpr = float(_fp / (_fp + _tn)) if (_fp + _tn) > 0 else 0.0
-    _cur_tpr = _rec
+    _cur_fpr = float(_fp / _neg_total)
+    _star = {
+        "color": "#FACC15",
+        "size": 14,
+        "symbol": "star",
+        "line": {"width": 1.5, "color": "#0F172A"},
+    }
 
     _fig_curves = make_subplots(
         rows=1,
@@ -763,46 +647,38 @@ def _(
     )
     _fig_curves.add_trace(
         go.Scatter(
-            x=[0, 1], y=[0, 1], mode="lines", name="Random", line=dict(color="#94A3B8", dash="dash")
-        ),
-        row=1,
-        col=1,
-    )
-    _fig_curves.add_trace(
-        go.Scatter(x=_fpr, y=_tpr, mode="lines", name="ROC", line=dict(color="#2563EB", width=2.5)),
-        row=1,
-        col=1,
-    )
-    _fig_curves.add_trace(
-        go.Scatter(
-            x=[_cur_fpr],
-            y=[_cur_tpr],
-            mode="markers",
-            name=f"Threshold {_thr:.2f}",
-            marker=dict(
-                color="#FACC15", size=14, symbol="star", line=dict(width=1.5, color="#0F172A")
-            ),
+            x=[0, 1],
+            y=[0, 1],
+            mode="lines",
+            name="Random",
+            line={"color": "#94A3B8", "dash": "dash"},
         ),
         row=1,
         col=1,
     )
     _fig_curves.add_trace(
         go.Scatter(
-            x=_pr_r, y=_pr_p, mode="lines", name="PR Curve", line=dict(color="#EA580C", width=2.5)
+            x=_fpr, y=_tpr, mode="lines", name="ROC", line={"color": "#2563EB", "width": 2.5}
+        ),
+        row=1,
+        col=1,
+    )
+    _fig_curves.add_trace(
+        go.Scatter(
+            x=[_cur_fpr], y=[_rec], mode="markers", name=f"Threshold {_thr:.2f}", marker=_star
+        ),
+        row=1,
+        col=1,
+    )
+    _fig_curves.add_trace(
+        go.Scatter(
+            x=_pr_r, y=_pr_p, mode="lines", name="PR Curve", line={"color": "#EA580C", "width": 2.5}
         ),
         row=1,
         col=2,
     )
     _fig_curves.add_trace(
-        go.Scatter(
-            x=[_rec],
-            y=[_prec],
-            mode="markers",
-            showlegend=False,
-            marker=dict(
-                color="#FACC15", size=14, symbol="star", line=dict(width=1.5, color="#0F172A")
-            ),
-        ),
+        go.Scatter(x=[_rec], y=[_prec], mode="markers", showlegend=False, marker=_star),
         row=1,
         col=2,
     )
@@ -814,22 +690,21 @@ def _(
     _fig_curves.update_yaxes(title_text="Precision", range=[-0.02, 1.04], row=1, col=2)
     style_fig(_fig_curves, "Operating Point on ROC & Precision–Recall Curves", height=390)
 
-    # Error Analysis Gallery: up to 4 False Positives + up to 4 False Negatives
     _fp_idx = np.where((_pred == 1) & (_y_te == 0))[0]
     _fn_idx = np.where((_pred == 0) & (_y_te == 1))[0]
-    # Rank most confident errors first
     _fp_sorted = _fp_idx[np.argsort(-_probs[_fp_idx])][:4]
     _fn_sorted = _fn_idx[np.argsort(_probs[_fn_idx])][:4]
-
     _gallery_items = [("FP", int(i)) for i in _fp_sorted] + [("FN", int(i)) for i in _fn_sorted]
+
     if _gallery_items:
-        _ncols = len(_gallery_items)
-        _gal_titles = [
-            f"{kind}: True={_orig_te[idx]}<br>P(9)={_probs[idx]:.2f}"
-            for kind, idx in _gallery_items
-        ]
         _fig_gal = make_subplots(
-            rows=1, cols=_ncols, subplot_titles=_gal_titles, horizontal_spacing=0.03
+            rows=1,
+            cols=len(_gallery_items),
+            subplot_titles=[
+                f"{kind}: True={_orig_te[idx]}<br>P(9)={_probs[idx]:.2f}"
+                for kind, idx in _gallery_items
+            ],
+            horizontal_spacing=0.03,
         )
         for _ci, (_kind, _di) in enumerate(_gallery_items, start=1):
             _fig_gal.add_trace(
@@ -865,54 +740,50 @@ def _(
         widths="equal",
         gap=0.7,
     )
-
-    mo.vstack(
-        [_stats, mo.ui.plotly(_fig_top), mo.ui.plotly(_fig_curves), _gal_widget],
-        gap=0.75,
-    )
+    mo.vstack([_stats, mo.ui.plotly(_fig_top), mo.ui.plotly(_fig_curves), _gal_widget], gap=0.75)
 
 
 @app.cell
-def _(mo, pd):
-    mo.md("""
-    ---
-    ## Reference · Evaluation Strategy & Metric Selection Guide
-    """)
-    _guide = pd.DataFrame(
+def _():
+    _rows = [
+        {
+            "Scenario": "Balanced Multi-Class Classification",
+            "Recommended Splitter": "StratifiedKFold",
+            "Primary Metrics": "Accuracy, Macro-F1, Confusion Matrix",
+            "Watch Out For": "Sorted target rows (never leave shuffle=False with plain KFold)",
+        },
+        {
+            "Scenario": "Rare-Event / Imbalanced Binary (Fraud, Disease)",
+            "Recommended Splitter": "StratifiedKFold",
+            "Primary Metrics": "PR-AUC (Average Precision), F1, Recall@K",
+            "Watch Out For": "Accuracy Paradox—a constant majority baseline can look 95%+ accurate",
+        },
+        {
+            "Scenario": "Ranking / Probability Calibration",
+            "Recommended Splitter": "StratifiedKFold",
+            "Primary Metrics": "ROC-AUC, Log Loss, Brier Score",
+            "Watch Out For": "Tuning decision thresholds on the final test set (use CV/val instead)",
+        },
+        {
+            "Scenario": "Grouped Patients / Repeated Subjects",
+            "Recommended Splitter": "GroupKFold / StratifiedGroupKFold",
+            "Primary Metrics": "Task metric computed strictly across unseen groups",
+            "Watch Out For": "Splitting same patient across train & test inflates scores via leakage",
+        },
+        {
+            "Scenario": "Regression (Continuous Targets)",
+            "Recommended Splitter": "KFold(shuffle=True)",
+            "Primary Metrics": "RMSE, MAE, R²",
+            "Watch Out For": "Heavy outliers distort RMSE/R²—compare against MAE & residual plots",
+        },
+    ]
+    mo.vstack(
         [
-            {
-                "Scenario": "Balanced Multi-Class Classification",
-                "Recommended Splitter": "StratifiedKFold",
-                "Primary Metrics": "Accuracy, Macro-F1, Confusion Matrix",
-                "Watch Out For": "Sorted target rows (never leave shuffle=False with plain KFold)",
-            },
-            {
-                "Scenario": "Rare-Event / Imbalanced Binary (Fraud, Disease)",
-                "Recommended Splitter": "StratifiedKFold",
-                "Primary Metrics": "PR-AUC (Average Precision), F1, Recall@K",
-                "Watch Out For": "Accuracy Paradox—a constant majority baseline can look 95%+ accurate",
-            },
-            {
-                "Scenario": "Ranking / Probability Calibration",
-                "Recommended Splitter": "StratifiedKFold",
-                "Primary Metrics": "ROC-AUC, Log Loss, Brier Score",
-                "Watch Out For": "Tuning decision thresholds on the final test set (use CV/val instead)",
-            },
-            {
-                "Scenario": "Grouped Patients / Repeated Subjects",
-                "Recommended Splitter": "GroupKFold / StratifiedGroupKFold",
-                "Primary Metrics": "Task metric computed strictly across unseen groups",
-                "Watch Out For": "Splitting same patient across train & test inflates scores via leakage",
-            },
-            {
-                "Scenario": "Regression (Continuous Targets)",
-                "Recommended Splitter": "KFold(shuffle=True)",
-                "Primary Metrics": "RMSE, MAE, R²",
-                "Watch Out For": "Heavy outliers distort RMSE/R²—compare against MAE & residual plots",
-            },
-        ]
+            mo.md("---\n## Reference · Evaluation Strategy & Metric Selection Guide"),
+            mo.ui.table(_rows, selection=None, show_column_summaries=False),
+        ],
+        gap=0.5,
     )
-    mo.ui.table(_guide, selection=None, show_column_summaries=False)
 
 
 if __name__ == "__main__":
