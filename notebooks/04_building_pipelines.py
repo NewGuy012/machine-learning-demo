@@ -3,10 +3,8 @@
 # dependencies = [
 #     "marimo",
 #     "numpy",
-#     "pandas",
 #     "plotly",
 #     "scikit-learn",
-#     "scipy",
 # ]
 # ///
 
@@ -15,17 +13,13 @@ import marimo
 __generated_with = "0.26.0"
 app = marimo.App(width="medium", app_title="04 · Building Pipelines")
 
-
-@app.cell
-def _():
+with app.setup:
     import functools
     import time
 
     import marimo as mo
     import numpy as np
-    import pandas as pd
     import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
     from sklearn.compose import ColumnTransformer
     from sklearn.datasets import load_breast_cancer
     from sklearn.decomposition import PCA
@@ -42,40 +36,184 @@ def _():
     from sklearn.pipeline import Pipeline, make_pipeline
     from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, RobustScaler, StandardScaler
     from sklearn.svm import SVC
+    from sklearn.utils import estimator_html_repr
 
-    return (
-        ColumnTransformer,
-        GradientBoostingClassifier,
-        GridSearchCV,
-        LogisticRegression,
-        MinMaxScaler,
-        OneHotEncoder,
-        PCA,
-        Pipeline,
-        RandomForestClassifier,
-        RobustScaler,
-        SVC,
-        SelectKBest,
-        SelectPercentile,
-        SimpleImputer,
-        StandardScaler,
-        StratifiedKFold,
-        cross_val_score,
-        f_classif,
-        functools,
-        go,
-        load_breast_cancer,
-        make_pipeline,
-        mo,
-        np,
-        pd,
-        time,
-        train_test_split,
+
+@app.function
+def style_fig(fig, title: str, height: int = 420):
+    fig.update_layout(
+        template="plotly_white",
+        title={"text": title, "font": {"size": 15}},
+        height=height,
+        margin={"l": 55, "r": 25, "t": 60, "b": 50},
+        paper_bgcolor="white",
+        plot_bgcolor="#F8FAFC",
+        font={"color": "#0F172A"},
     )
+    return fig
+
+
+@app.function
+def build_lab1_steps(scaler_name: str, reducer_name: str, estimator_name: str):
+    scalers = {
+        "MinMaxScaler": ("scaler", MinMaxScaler(), "MinMaxScaler()"),
+        "StandardScaler": ("scaler", StandardScaler(), "StandardScaler()"),
+        "RobustScaler": ("scaler", RobustScaler(), "RobustScaler()"),
+    }
+    reducers = {
+        "PCA (n=10)": ("pca", PCA(n_components=10, random_state=42), "PCA(n_components=10)"),
+        "SelectKBest (k=15)": ("select", SelectKBest(f_classif, k=15), "SelectKBest(k=15)"),
+    }
+    estimators = {
+        "SVC (C=100)": ("svc", SVC(C=100), "SVC(C=100)"),
+        "LogisticRegression": (
+            "logreg",
+            LogisticRegression(solver="liblinear", max_iter=1000),
+            'LogisticRegression(solver="liblinear", max_iter=1000)',
+        ),
+        "RandomForestClassifier": (
+            "rf",
+            RandomForestClassifier(n_estimators=60, random_state=42),
+            "RandomForestClassifier(n_estimators=60)",
+        ),
+        "GradientBoostingClassifier": (
+            "gbdt",
+            GradientBoostingClassifier(n_estimators=60, random_state=42),
+            "GradientBoostingClassifier(n_estimators=60)",
+        ),
+    }
+    chosen = [
+        item
+        for item in (
+            scalers.get(scaler_name),
+            reducers.get(reducer_name),
+            estimators[estimator_name],
+        )
+        if item is not None
+    ]
+    steps = [(name, est) for name, est, _ in chosen]
+    short_args = [arg for _, _, arg in chosen]
+    return steps, short_args
+
+
+@app.function
+@functools.lru_cache(maxsize=6)
+def run_svc_pipeline_grid(scaler_name: str, cv_folds: int):
+    cancer = load_breast_cancer()
+    X_tr, X_te, y_tr, y_te = train_test_split(cancer.data, cancer.target, random_state=0)
+    scalers = {
+        "MinMaxScaler": MinMaxScaler(),
+        "StandardScaler": StandardScaler(),
+        "RobustScaler": RobustScaler(),
+    }
+    pipe = Pipeline([("scaler", scalers[scaler_name]), ("svc", SVC())])
+    c_vals = [0.001, 0.01, 0.1, 1, 10, 100]
+    g_vals = [0.001, 0.01, 0.1, 1, 10, 100]
+    grid = GridSearchCV(
+        pipe,
+        param_grid={"svc__C": c_vals, "svc__gamma": g_vals},
+        cv=StratifiedKFold(n_splits=cv_folds),
+    ).fit(X_tr, y_tr)
+    return c_vals, g_vals, grid, float(grid.score(X_te, y_te))
+
+
+@app.function
+@functools.lru_cache(maxsize=3)
+def run_multimodel_grid(cv_folds: int):
+    cancer = load_breast_cancer()
+    X_tr, X_te, y_tr, y_te = train_test_split(cancer.data, cancer.target, random_state=0)
+    pipe = Pipeline([("preprocessing", StandardScaler()), ("classifier", SVC())])
+    param_grid = [
+        {
+            "preprocessing": [StandardScaler(), MinMaxScaler(), "passthrough"],
+            "classifier": [LogisticRegression(solver="liblinear", max_iter=1000)],
+            "classifier__C": [0.1, 1.0, 10.0],
+        },
+        {
+            "preprocessing": [StandardScaler(), MinMaxScaler()],
+            "classifier": [SVC()],
+            "classifier__C": [1.0, 10.0, 100.0],
+            "classifier__gamma": [0.01, 0.1],
+        },
+        {
+            "preprocessing": ["passthrough"],
+            "classifier": [RandomForestClassifier(n_estimators=60, random_state=42)],
+            "classifier__max_depth": [3, 6, None],
+        },
+    ]
+    grid = GridSearchCV(pipe, param_grid=param_grid, cv=StratifiedKFold(n_splits=cv_folds)).fit(
+        X_tr, y_tr
+    )
+    return grid, float(grid.score(X_te, y_te))
+
+
+@app.function
+def format_pipeline_config(params: dict) -> str:
+    pre = params["preprocessing"]
+    pre_name = pre if isinstance(pre, str) else type(pre).__name__
+    clf_name = type(params["classifier"]).__name__
+    parts = [f"{pre_name} → {clf_name}"]
+    for key, label in (
+        ("classifier__C", "C"),
+        ("classifier__gamma", "gamma"),
+        ("classifier__max_depth", "depth"),
+    ):
+        if key in params:
+            parts.append(f"({label}={params[key]})")
+    return " ".join(parts)
+
+
+@app.function
+@functools.lru_cache(maxsize=1)
+def make_renewal_dataset():
+    rng = np.random.default_rng(123)
+    n = 420
+    age = rng.integers(19, 72, size=n).astype(float)
+    income = np.round(rng.lognormal(mean=10.9, sigma=0.45, size=n), 0)
+    tenure = rng.integers(1, 72, size=n).astype(float)
+    tier = rng.choice(["Basic", "Pro", "Enterprise"], size=n, p=[0.45, 0.35, 0.20])
+    region = rng.choice(["North", "South", "West", "East"], size=n)
+    autopay = rng.choice(["Yes", "No"], size=n, p=[0.65, 0.35])
+
+    logit = (
+        -1.2
+        + 0.04 * tenure
+        + 0.9 * (tier == "Enterprise")
+        + 0.45 * (tier == "Pro")
+        + 0.85 * (autopay == "Yes")
+        + 0.25 * ((income - 55000) / 30000)
+        + rng.normal(0, 0.65, size=n)
+    )
+    y = (logit > 0.5).astype(int)
+
+    age[rng.random(n) < 0.08] = np.nan
+    income[rng.random(n) < 0.06] = np.nan
+    tier_obj = tier.astype(object)
+    tier_obj[rng.random(n) < 0.05] = np.nan
+
+    col_names = ["age", "annual_income", "tenure_months", "plan_tier", "region", "autopay"]
+    X = np.column_stack(
+        [
+            age.astype(object),
+            income.astype(object),
+            tenure.astype(object),
+            tier_obj,
+            region.astype(object),
+            autopay.astype(object),
+        ]
+    )
+    preview_rows = [
+        {
+            name: (None if isinstance(val, float) and np.isnan(val) else val)
+            for name, val in zip(col_names, row, strict=True)
+        }
+        for row in X[:6]
+    ]
+    return X, y, col_names, preview_rows
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     # 04 · Building Machine Learning Pipelines
 
@@ -90,22 +228,8 @@ def _(mo):
     """)
 
 
-@app.function
-def style_fig(fig, title: str, height: int = 420):
-    fig.update_layout(
-        template="plotly_white",
-        title=dict(text=title, font=dict(size=15)),
-        height=height,
-        margin=dict(l=55, r=25, t=60, b=50),
-        paper_bgcolor="white",
-        plot_bgcolor="#F8FAFC",
-        font=dict(color="#0F172A"),
-    )
-    return fig
-
-
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 1 · Interactive Pipeline Builder (`Pipeline` vs. `make_pipeline`)
@@ -115,7 +239,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     pipe_scaler = mo.ui.dropdown(
         options=["None (passthrough)", "MinMaxScaler", "StandardScaler", "RobustScaler"],
         value="MinMaxScaler",
@@ -151,64 +275,16 @@ def _(mo):
 
 
 @app.cell
-def _(
-    GradientBoostingClassifier,
-    LogisticRegression,
-    MinMaxScaler,
-    PCA,
-    Pipeline,
-    RandomForestClassifier,
-    RobustScaler,
-    SVC,
-    SelectKBest,
-    StandardScaler,
-    cross_val_score,
-    f_classif,
-    load_breast_cancer,
-    mo,
-    pipe_estimator,
-    pipe_reducer,
-    pipe_scaler,
-    time,
-    train_test_split,
-):
+def _(pipe_estimator, pipe_reducer, pipe_scaler):
     _cancer = load_breast_cancer()
     _X_tr, _X_te, _y_tr, _y_te = train_test_split(_cancer.data, _cancer.target, random_state=0)
 
-    _steps = []
-    _short_args = []
-
-    if pipe_scaler.value == "MinMaxScaler":
-        _steps.append(("scaler", MinMaxScaler()))
-        _short_args.append("MinMaxScaler()")
-    elif pipe_scaler.value == "StandardScaler":
-        _steps.append(("scaler", StandardScaler()))
-        _short_args.append("StandardScaler()")
-    elif pipe_scaler.value == "RobustScaler":
-        _steps.append(("scaler", RobustScaler()))
-        _short_args.append("RobustScaler()")
-
-    if pipe_reducer.value == "PCA (n=10)":
-        _steps.append(("pca", PCA(n_components=10, random_state=42)))
-        _short_args.append("PCA(n_components=10)")
-    elif pipe_reducer.value == "SelectKBest (k=15)":
-        _steps.append(("select", SelectKBest(f_classif, k=15)))
-        _short_args.append("SelectKBest(k=15)")
-
-    if pipe_estimator.value == "SVC (C=100)":
-        _steps.append(("svc", SVC(C=100)))
-        _short_args.append("SVC(C=100)")
-    elif pipe_estimator.value == "LogisticRegression":
-        _steps.append(("logreg", LogisticRegression(solver="liblinear", max_iter=1000)))
-        _short_args.append('LogisticRegression(solver="liblinear", max_iter=1000)')
-    elif pipe_estimator.value == "RandomForestClassifier":
-        _steps.append(("rf", RandomForestClassifier(n_estimators=60, random_state=42)))
-        _short_args.append("RandomForestClassifier(n_estimators=60)")
-    else:
-        _steps.append(("gbdt", GradientBoostingClassifier(n_estimators=60, random_state=42)))
-        _short_args.append("GradientBoostingClassifier(n_estimators=60)")
-
+    _steps, _short_args = build_lab1_steps(
+        pipe_scaler.value, pipe_reducer.value, pipe_estimator.value
+    )
     _pipe = Pipeline(_steps)
+    _auto_names = [s[0] for s in make_pipeline(*(est for _, est in _steps)).steps]
+
     _t0 = time.perf_counter()
     _cv_scores = cross_val_score(_pipe, _X_tr, _y_tr, cv=5)
     _pipe.fit(_X_tr, _y_tr)
@@ -226,7 +302,7 @@ def _(
                 f"""**Explicit `Pipeline` (Custom Step Names)**\n```python\npipe_long = Pipeline([\n    {_explicit_lines}\n])\n```"""
             ),
             mo.md(
-                f"""**Shorthand `make_pipeline` (Auto Lowercase Names)**\n```python\npipe_short = make_pipeline({_short_lines})\n# Step names: {[s[0] for s in _pipe.steps]}\n```"""
+                f"""**Shorthand `make_pipeline` (Auto Lowercase Names)**\n```python\npipe_short = make_pipeline({_short_lines})\n# Step names: {_auto_names}\n```"""
             ),
         ],
         widths="equal",
@@ -250,7 +326,7 @@ def _(
                 mo.md(
                     "**Interactive Scikit-Learn Pipeline Diagram** *(click any block to expand parameters)*"
                 ),
-                mo.Html(_pipe._repr_html_()),
+                mo.Html(estimator_html_repr(_pipe)),
             ]
         ),
         kind="neutral",
@@ -278,7 +354,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 2 · Data Leakage Simulator ("The #1 Reason Pipelines Exist")
@@ -290,7 +366,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     leak_n_features = mo.ui.slider(
         start=200,
         stop=3000,
@@ -317,20 +393,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    LogisticRegression,
-    SelectPercentile,
-    StandardScaler,
-    cross_val_score,
-    f_classif,
-    go,
-    leak_n_features,
-    leak_percentile,
-    make_pipeline,
-    mo,
-    np,
-    train_test_split,
-):
+def _(leak_n_features, leak_percentile):
     _rng = np.random.default_rng(42)
     _n_samples = 180
     _p = int(leak_n_features.value)
@@ -342,22 +405,16 @@ def _(
         _X, _y, test_size=0.30, stratify=_y, random_state=42
     )
 
-    # 1. LEAKY: SelectPercentile uses ALL y_tr BEFORE cross_val_score splits folds!
-    _sel_leaky = SelectPercentile(f_classif, percentile=_pct)
-    _X_tr_leaky = _sel_leaky.fit_transform(_X_tr, _y_tr)
+    # Leaky: feature selection sees all y_tr before CV folds are split
+    _X_tr_leaky = SelectPercentile(f_classif, percentile=_pct).fit_transform(_X_tr, _y_tr)
     _leaky_cv = cross_val_score(
         make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)),
         _X_tr_leaky,
         _y_tr,
         cv=5,
     )
-    # Evaluate that leaky model on truly unseen test data
-    _leaky_clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)).fit(
-        _X_tr_leaky, _y_tr
-    )
-    _leaky_test = float(_leaky_clf.score(_sel_leaky.transform(_X_te), _y_te))
 
-    # 2. HONEST PIPELINE: SelectPercentile fits INSIDE each CV fold!
+    # Honest: feature selection runs inside each CV fold
     _honest_pipe = make_pipeline(
         SelectPercentile(f_classif, percentile=_pct),
         StandardScaler(),
@@ -373,13 +430,12 @@ def _(
         "Unseen Test Set<br>(True Generalization)",
     ]
     _scores = [float(_leaky_cv.mean()), float(_honest_cv.mean()), _honest_test]
-    _colors = ["#DC2626", "#059669", "#2563EB"]
 
     _fig = go.Figure(
         go.Bar(
             x=_labels,
             y=_scores,
-            marker_color=_colors,
+            marker_color=["#DC2626", "#059669", "#2563EB"],
             text=[f"{s:.1%}" for s in _scores],
             textposition="outside",
             width=0.48,
@@ -424,7 +480,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 3 · Pipelines in `GridSearchCV`: Hyperparameter Landscape & Multi-Model Search
@@ -434,68 +490,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    GridSearchCV,
-    LogisticRegression,
-    MinMaxScaler,
-    Pipeline,
-    RandomForestClassifier,
-    RobustScaler,
-    SVC,
-    StandardScaler,
-    StratifiedKFold,
-    functools,
-    load_breast_cancer,
-    mo,
-    train_test_split,
-):
-    @functools.lru_cache(maxsize=6)
-    def run_svc_pipeline_grid(scaler_name: str, cv_folds: int):
-        _cancer = load_breast_cancer()
-        _X_tr, _X_te, _y_tr, _y_te = train_test_split(_cancer.data, _cancer.target, random_state=0)
-        _scalers = {
-            "MinMaxScaler": MinMaxScaler(),
-            "StandardScaler": StandardScaler(),
-            "RobustScaler": RobustScaler(),
-        }
-        _pipe = Pipeline([("scaler", _scalers[scaler_name]), ("svc", SVC())])
-        _c_vals = [0.001, 0.01, 0.1, 1, 10, 100]
-        _g_vals = [0.001, 0.01, 0.1, 1, 10, 100]
-        _grid = GridSearchCV(
-            _pipe,
-            param_grid={"svc__C": _c_vals, "svc__gamma": _g_vals},
-            cv=StratifiedKFold(n_splits=cv_folds),
-        ).fit(_X_tr, _y_tr)
-        return _c_vals, _g_vals, _grid, float(_grid.score(_X_te, _y_te))
-
-    @functools.lru_cache(maxsize=3)
-    def run_multimodel_grid(cv_folds: int):
-        _cancer = load_breast_cancer()
-        _X_tr, _X_te, _y_tr, _y_te = train_test_split(_cancer.data, _cancer.target, random_state=0)
-        _pipe = Pipeline([("preprocessing", StandardScaler()), ("classifier", SVC())])
-        _param_grid = [
-            {
-                "preprocessing": [StandardScaler(), MinMaxScaler(), "passthrough"],
-                "classifier": [LogisticRegression(solver="liblinear", max_iter=1000)],
-                "classifier__C": [0.1, 1.0, 10.0],
-            },
-            {
-                "preprocessing": [StandardScaler(), MinMaxScaler()],
-                "classifier": [SVC()],
-                "classifier__C": [1.0, 10.0, 100.0],
-                "classifier__gamma": [0.01, 0.1],
-            },
-            {
-                "preprocessing": ["passthrough"],
-                "classifier": [RandomForestClassifier(n_estimators=60, random_state=42)],
-                "classifier__max_depth": [3, 6, None],
-            },
-        ]
-        _grid = GridSearchCV(
-            _pipe, param_grid=_param_grid, cv=StratifiedKFold(n_splits=cv_folds)
-        ).fit(_X_tr, _y_tr)
-        return _grid, float(_grid.score(_X_te, _y_te))
-
+def _():
     gs_scaler = mo.ui.radio(
         options=["MinMaxScaler", "StandardScaler", "RobustScaler"],
         value="MinMaxScaler",
@@ -519,25 +514,15 @@ def _(
         ),
         kind="info",
     )
-    return gs_folds, gs_scaler, run_multimodel_grid, run_svc_pipeline_grid
+    return gs_folds, gs_scaler
 
 
 @app.cell
-def _(
-    go,
-    gs_folds,
-    gs_scaler,
-    mo,
-    pd,
-    run_multimodel_grid,
-    run_svc_pipeline_grid,
-):
+def _(gs_folds, gs_scaler):
     _c_vals, _g_vals, _grid, _test_acc = run_svc_pipeline_grid(gs_scaler.value, int(gs_folds.value))
     _means = _grid.cv_results_["mean_test_score"].reshape(len(_c_vals), len(_g_vals))
     _stds = _grid.cv_results_["std_test_score"].reshape(len(_c_vals), len(_g_vals))
 
-    _c_lbls = [str(c) for c in _c_vals]
-    _g_lbls = [str(g) for g in _g_vals]
     _hover = [
         [
             f"svc__C={_c_vals[r]}, svc__gamma={_g_vals[c]}<br>Mean CV={_means[r, c]:.4f} ± {_stds[r, c]:.4f}"
@@ -545,7 +530,6 @@ def _(
         ]
         for r in range(len(_c_vals))
     ]
-
     _best_r = _c_vals.index(_grid.best_params_["svc__C"])
     _best_c = _g_vals.index(_grid.best_params_["svc__gamma"])
     _hm_text = [
@@ -558,18 +542,17 @@ def _(
         for r in range(len(_c_vals))
     ]
 
-    _fig_hm = go.Figure()
-    _fig_hm.add_trace(
+    _fig_hm = go.Figure(
         go.Heatmap(
             z=_means,
-            x=_g_lbls,
-            y=_c_lbls,
+            x=[str(g) for g in _g_vals],
+            y=[str(c) for c in _c_vals],
             colorscale="Viridis",
             text=_hm_text,
             texttemplate="%{text}",
             hovertext=_hover,
             hoverinfo="text",
-            colorbar=dict(title="Mean CV"),
+            colorbar={"title": "Mean CV"},
         )
     )
     _fig_hm.add_shape(
@@ -578,7 +561,7 @@ def _(
         x1=_best_c + 0.48,
         y0=_best_r - 0.48,
         y1=_best_r + 0.48,
-        line=dict(color="#0F172A", width=3),
+        line={"color": "#0F172A", "width": 3},
     )
     _fig_hm.update_xaxes(title_text="svc__gamma", type="category")
     _fig_hm.update_yaxes(title_text="svc__C", type="category")
@@ -588,30 +571,27 @@ def _(
         height=430,
     )
 
-    # Multi-model pipeline comparison
     _mm_grid, _mm_test = run_multimodel_grid(int(gs_folds.value))
-    _res_df = pd.DataFrame(_mm_grid.cv_results_).sort_values("rank_test_score").head(10).copy()
-    _res_df["Pipeline Config"] = _res_df["params"].apply(
-        lambda d: (
-            f"{d['preprocessing'] if isinstance(d['preprocessing'], str) else type(d['preprocessing']).__name__}"
-            f" → {type(d['classifier']).__name__}"
-            + (f" (C={d['classifier__C']})" if "classifier__C" in d else "")
-            + (f" (gamma={d['classifier__gamma']})" if "classifier__gamma" in d else "")
-            + (f" (depth={d['classifier__max_depth']})" if "classifier__max_depth" in d else "")
-        )
-    )
-    _res_sorted = _res_df.iloc[::-1]
+    _cv_res = _mm_grid.cv_results_
+    _top10 = sorted(
+        zip(
+            _cv_res["rank_test_score"],
+            _cv_res["mean_test_score"],
+            _cv_res["std_test_score"],
+            _cv_res["params"],
+            strict=True,
+        ),
+        key=lambda row: (int(row[0]), -float(row[1])),
+    )[:10][::-1]
 
     _fig_mm = go.Figure(
         go.Bar(
-            x=_res_sorted["mean_test_score"],
-            y=_res_sorted["Pipeline Config"],
+            x=[float(m) for _, m, _, _ in _top10],
+            y=[format_pipeline_config(p) for _, _, _, p in _top10],
             orientation="h",
-            error_x=dict(type="data", array=_res_sorted["std_test_score"], visible=True),
-            marker_color=[
-                "#059669" if r == 1 else "#2563EB" for r in _res_sorted["rank_test_score"]
-            ],
-            text=[f"{s:.2%}" for s in _res_sorted["mean_test_score"]],
+            error_x={"type": "data", "array": [float(s) for _, _, s, _ in _top10], "visible": True},
+            marker_color=["#059669" if int(r) == 1 else "#2563EB" for r, _, _, _ in _top10],
+            text=[f"{float(m):.2%}" for _, m, _, _ in _top10],
             textposition="outside",
         )
     )
@@ -644,7 +624,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 4 · Real-World Tabular Data with `ColumnTransformer`
@@ -654,7 +634,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     ct_model = mo.ui.radio(
         options=["LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier"],
         value="LogisticRegression",
@@ -669,68 +649,11 @@ def _(mo):
 
 
 @app.cell
-def _(
-    ColumnTransformer,
-    GradientBoostingClassifier,
-    LogisticRegression,
-    OneHotEncoder,
-    Pipeline,
-    RandomForestClassifier,
-    SimpleImputer,
-    StandardScaler,
-    cross_val_score,
-    ct_model,
-    go,
-    mo,
-    np,
-    pd,
-    train_test_split,
-):
-    # Deterministic mixed-type synthetic customer renewal dataset
-    _rng = np.random.default_rng(123)
-    _n = 420
-    _age = _rng.integers(19, 72, size=_n).astype(float)
-    _income = np.round(_rng.lognormal(mean=10.9, sigma=0.45, size=_n), 0)
-    _tenure = _rng.integers(1, 72, size=_n).astype(float)
-    _tier = _rng.choice(["Basic", "Pro", "Enterprise"], size=_n, p=[0.45, 0.35, 0.20])
-    _region = _rng.choice(["North", "South", "West", "East"], size=_n)
-    _autopay = _rng.choice(["Yes", "No"], size=_n, p=[0.65, 0.35])
-
-    # Underlying renewal probability driven by tenure, tier, autopay, and income
-    _logit = (
-        -1.2
-        + 0.04 * _tenure
-        + 0.9 * (_tier == "Enterprise")
-        + 0.45 * (_tier == "Pro")
-        + 0.85 * (_autopay == "Yes")
-        + 0.25 * ((_income - 55000) / 30000)
-        + _rng.normal(0, 0.65, size=_n)
-    )
-    _y = (_logit > 0.5).astype(int)
-
-    # Inject realistic missing values
-    _age[_rng.random(_n) < 0.08] = np.nan
-    _income[_rng.random(_n) < 0.06] = np.nan
-    _tier_series = pd.Series(_tier, dtype="object")
-    _tier_series.iloc[_rng.random(_n) < 0.05] = np.nan
-
-    _df = pd.DataFrame(
-        {
-            "age": _age,
-            "annual_income": _income,
-            "tenure_months": _tenure,
-            "plan_tier": _tier_series,
-            "region": _region,
-            "autopay": _autopay,
-        }
-    )
-
+def _(ct_model):
+    _X, _y, _col_names, _preview_rows = make_renewal_dataset()
     _X_tr, _X_te, _y_tr, _y_te = train_test_split(
-        _df, _y, stratify=_y, test_size=0.25, random_state=42
+        _X, _y, stratify=_y, test_size=0.25, random_state=42
     )
-
-    _num_cols = ["age", "annual_income", "tenure_months"]
-    _cat_cols = ["plan_tier", "region", "autopay"]
 
     _preproc = ColumnTransformer(
         transformers=[
@@ -739,7 +662,7 @@ def _(
                 Pipeline(
                     [("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]
                 ),
-                _num_cols,
+                [0, 1, 2],
             ),
             (
                 "categorical",
@@ -749,24 +672,26 @@ def _(
                         ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
                     ]
                 ),
-                _cat_cols,
+                [3, 4, 5],
             ),
         ]
     )
 
-    if ct_model.value == "LogisticRegression":
-        _clf = LogisticRegression(max_iter=1000)
-    elif ct_model.value == "RandomForestClassifier":
-        _clf = RandomForestClassifier(n_estimators=80, max_depth=6, random_state=42)
-    else:
-        _clf = GradientBoostingClassifier(n_estimators=80, max_depth=3, random_state=42)
-
-    _full_pipe = Pipeline([("preprocess", _preproc), ("model", _clf)])
+    _clfs = {
+        "LogisticRegression": LogisticRegression(max_iter=1000),
+        "RandomForestClassifier": RandomForestClassifier(
+            n_estimators=80, max_depth=6, random_state=42
+        ),
+        "GradientBoostingClassifier": GradientBoostingClassifier(
+            n_estimators=80, max_depth=3, random_state=42
+        ),
+    }
+    _full_pipe = Pipeline([("preprocess", _preproc), ("model", _clfs[ct_model.value])])
     _cv = cross_val_score(_full_pipe, _X_tr, _y_tr, cv=5)
     _full_pipe.fit(_X_tr, _y_tr)
     _te_acc = float(_full_pipe.score(_X_te, _y_te))
 
-    _feat_names = list(_full_pipe.named_steps["preprocess"].get_feature_names_out())
+    _feat_names = list(_full_pipe.named_steps["preprocess"].get_feature_names_out(_col_names))
     _est = _full_pipe.named_steps["model"]
     if hasattr(_est, "coef_"):
         _imp = _est.coef_[0]
@@ -792,7 +717,7 @@ def _(
             mo.stat(f"{_cv.mean():.1%}", label="5-Fold CV Accuracy", bordered=True),
             mo.stat(f"{_te_acc:.1%}", label="Test Accuracy", bordered=True),
             mo.stat(
-                f"{_df.shape[1]} raw → {len(_feat_names)} encoded",
+                f"{_X.shape[1]} raw → {len(_feat_names)} encoded",
                 label="Feature Expansion",
                 bordered=True,
             ),
@@ -803,8 +728,8 @@ def _(
 
     _preview = mo.accordion(
         {
-            "Inspect Raw Mixed-Type Input Data (first 6 rows with NaNs & strings)": mo.ui.table(
-                _df.head(6), selection=None, show_column_summaries=False
+            "Inspect Raw Mixed-Type Input Data (first 6 rows with missing values & strings)": mo.ui.table(
+                _preview_rows, selection=None, show_column_summaries=False
             )
         }
     )
@@ -818,7 +743,7 @@ def _(
                         mo.md(
                             "**Branching Pipeline Architecture (`ColumnTransformer` + Classifier)**"
                         ),
-                        mo.Html(_full_pipe._repr_html_()),
+                        mo.Html(estimator_html_repr(_full_pipe)),
                     ]
                 ),
                 kind="neutral",
@@ -831,41 +756,41 @@ def _(
 
 
 @app.cell
-def _(mo, pd):
-    mo.md("""
-    ---
-    ## Reference · Pipeline & Preprocessing Best Practices
-    """)
-    _cheat = pd.DataFrame(
+def _():
+    _rows = [
+        {
+            "Component": "Pipeline([...])",
+            "Purpose": "Chain transformers & final estimator with explicit step names",
+            "Key Rule / Gotcha": "All intermediate steps must implement .fit() and .transform()",
+        },
+        {
+            "Component": "make_pipeline(...)",
+            "Purpose": "Shorthand Pipeline with automatic lowercase step names",
+            "Key Rule / Gotcha": "Duplicate class names auto-suffix (pca-1, pca-2); check .steps",
+        },
+        {
+            "Component": "ColumnTransformer([...])",
+            "Purpose": "Apply different pipelines to numeric vs. categorical columns",
+            "Key Rule / Gotcha": "Default remainder='drop' drops unlisted columns unless set to 'passthrough'",
+        },
+        {
+            "Component": "GridSearchCV + Pipeline",
+            "Purpose": "Tune preprocessing and model hyperparameters jointly without leakage",
+            "Key Rule / Gotcha": "Prefix every param with '<stepname>__' (double underscore)",
+        },
+        {
+            "Component": "Data Leakage Prevention",
+            "Purpose": "Keep validation/test distributions strictly isolated during fitting",
+            "Key Rule / Gotcha": "Never call scaler/imputer/selector .fit() or .fit_transform() before CV/split",
+        },
+    ]
+    mo.vstack(
         [
-            {
-                "Component": "Pipeline([...])",
-                "Purpose": "Chain transformers & final estimator with explicit step names",
-                "Key Rule / Gotcha": "All intermediate steps must implement .fit() and .transform()",
-            },
-            {
-                "Component": "make_pipeline(...)",
-                "Purpose": "Shorthand Pipeline with automatic lowercase step names",
-                "Key Rule / Gotcha": "Duplicate class names auto-suffix (pca-1, pca-2); check .steps",
-            },
-            {
-                "Component": "ColumnTransformer([...])",
-                "Purpose": "Apply different pipelines to numeric vs. categorical columns",
-                "Key Rule / Gotcha": "Default remainder='drop' drops unlisted columns unless set to 'passthrough'",
-            },
-            {
-                "Component": "GridSearchCV + Pipeline",
-                "Purpose": "Tune preprocessing and model hyperparameters jointly without leakage",
-                "Key Rule / Gotcha": "Prefix every param with '<stepname>__' (double underscore)",
-            },
-            {
-                "Component": "Data Leakage Prevention",
-                "Purpose": "Keep validation/test distributions strictly isolated during fitting",
-                "Key Rule / Gotcha": "Never call scaler/imputer/selector .fit() or .fit_transform() before CV/split",
-            },
-        ]
+            mo.md("---\n## Reference · Pipeline & Preprocessing Best Practices"),
+            mo.ui.table(_rows, selection=None, show_column_summaries=False),
+        ],
+        gap=0.5,
     )
-    mo.ui.table(_cheat, selection=None, show_column_summaries=False)
 
 
 if __name__ == "__main__":
