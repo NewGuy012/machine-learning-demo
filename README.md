@@ -50,10 +50,10 @@ flowchart LR
 
 | Notebook | Interactive Labs & Concepts | Datasets | Launch Locally (`uv`) | Browser Demo |
 | :--- | :--- | :--- | :--- | :--- |
-| [**01 · Supervised Learning**](notebooks/01_supervised_learning.py) | Iris SPLOM & feature explorer, $k$-NN decision contours & complexity curve, Breast Cancer SVM scaling collapse & ringed support vectors, Trees vs. Random Forest vs. GBDT, 8-classifier showdown (Linear, Naive Bayes, MLP), and Polynomial Ridge/Lasso | Iris, Breast Cancer, Moons, Circles, XOR, Blobs | `uv run marimo edit notebooks/01_supervised_learning.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/01_supervised_learning/) |
-| [**02 · Unsupervised Learning**](notebooks/02_unsupervised_learning.py) | Scaled vs. unscaled 2D/3D PCA + loadings heatmap, NMF parts-based strokes vs. PCA eigen-digits, t-SNE perplexity explorer, DBSCAN core/border/noise playground, and $k$-Means vs. Agglomerative (dendrogram) vs. DBSCAN | Breast Cancer, Digits, Moons, Circles, Blobs | `uv run marimo edit notebooks/02_unsupervised_learning.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/02_unsupervised_learning/) |
-| [**03 · Model Evaluation**](notebooks/03_model_evaluation.py) | Fold split matrix exposing unshuffled `KFold` 0% collapse on Iris, learning & validation curves, 2D `GridSearchCV` surface, Accuracy Paradox (`DummyClassifier`), synced ROC/PR threshold slider, and misclassified digit gallery | Iris, Breast Cancer, Digits (`== 9`) | `uv run marimo edit notebooks/03_model_evaluation.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/03_model_evaluation/) |
-| [**04 · Building Pipelines**](notebooks/04_building_pipelines.py) | Interactive Pipeline Builder with live scikit-learn HTML diagrams, Data Leakage Simulator on high-dimensional noise, `GridSearchCV` heatmap + multi-model pipeline search, and mixed-type `ColumnTransformer` | Breast Cancer, High-Dim Noise, Synthetic Tabular | `uv run marimo edit notebooks/04_building_pipelines.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/04_building_pipelines/) |
+| [**01 · Supervised Learning**](notebooks/01_supervised_learning.py) | Iris SPLOM & feature explorer, $k$-NN decision contours & complexity curve, Breast Cancer SVM scaling collapse & ringed support vectors, Trees vs. Random Forest vs. GBDT, 8-classifier showdown (Linear, Naive Bayes, MLP), and Polynomial Ridge/Lasso | Iris, Breast Cancer, Moons, Circles, XOR, Blobs | `uv run marimo edit --no-sandbox notebooks/01_supervised_learning.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/01_supervised_learning/) |
+| [**02 · Unsupervised Learning**](notebooks/02_unsupervised_learning.py) | Scaled vs. unscaled 2D/3D PCA + loadings heatmap, NMF parts-based strokes vs. PCA eigen-digits, t-SNE perplexity explorer, DBSCAN core/border/noise playground, and $k$-Means vs. Agglomerative (dendrogram) vs. DBSCAN | Breast Cancer, Digits, Moons, Circles, Blobs | `uv run marimo edit --no-sandbox notebooks/02_unsupervised_learning.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/02_unsupervised_learning/) |
+| [**03 · Model Evaluation**](notebooks/03_model_evaluation.py) | Fold split matrix exposing unshuffled `KFold` 0% collapse on Iris, learning & validation curves, 2D `GridSearchCV` surface, Accuracy Paradox (`DummyClassifier`), synced ROC/PR threshold slider, and misclassified digit gallery | Iris, Breast Cancer, Digits (`== 9`) | `uv run marimo edit --no-sandbox notebooks/03_model_evaluation.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/03_model_evaluation/) |
+| [**04 · Building Pipelines**](notebooks/04_building_pipelines.py) | Interactive Pipeline Builder with live scikit-learn HTML diagrams, Data Leakage Simulator on high-dimensional noise, `GridSearchCV` heatmap + multi-model pipeline search, and mixed-type `ColumnTransformer` | Breast Cancer, High-Dim Noise, Synthetic Tabular | `uv run marimo edit --no-sandbox notebooks/04_building_pipelines.py` | [Open Lab](https://newguy012.github.io/machine-learning-demo/04_building_pipelines/) |
 
 ---
 
@@ -83,7 +83,7 @@ uv sync
   ```
 - **Interactive App Mode** *(clean UI focused on sliders and visualizations)*:
   ```bash
-  uv run marimo run notebooks/01_supervised_learning.py
+  uv run marimo run --no-sandbox notebooks/01_supervised_learning.py
   ```
 - **Run a single notebook standalone via `uvx`** *(uses inline `# /// script` metadata without cloning into a project venv)*:
   ```bash
