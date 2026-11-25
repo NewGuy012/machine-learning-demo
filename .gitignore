@@ -1,0 +1,22 @@
+# Virtual environments & uv
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Marimo caches & temporary exports
+.marimo/
+__marimo__/
+
+# Built static WASM site (generated in CI / locally via scripts/build_site.py)
+_site/
+dist/
+
+# OS & editor artifacts
+.DS_Store
+.vscode/
+.idea/
