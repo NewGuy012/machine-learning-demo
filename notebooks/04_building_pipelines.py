@@ -546,6 +546,18 @@ def _(
         for r in range(len(_c_vals))
     ]
 
+    _best_r = _c_vals.index(_grid.best_params_["svc__C"])
+    _best_c = _g_vals.index(_grid.best_params_["svc__gamma"])
+    _hm_text = [
+        [
+            f"<b>★ {_means[r, c]:.3f}</b>"
+            if (r == _best_r and c == _best_c)
+            else f"{_means[r, c]:.3f}"
+            for c in range(len(_g_vals))
+        ]
+        for r in range(len(_c_vals))
+    ]
+
     _fig_hm = go.Figure()
     _fig_hm.add_trace(
         go.Heatmap(
@@ -553,26 +565,20 @@ def _(
             x=_g_lbls,
             y=_c_lbls,
             colorscale="Viridis",
-            text=[[f"{v:.3f}" for v in row] for row in _means],
+            text=_hm_text,
             texttemplate="%{text}",
             hovertext=_hover,
             hoverinfo="text",
             colorbar=dict(title="Mean CV"),
         )
     )
-    _fig_hm.add_trace(
-        go.Scatter(
-            x=[str(_grid.best_params_["svc__gamma"])],
-            y=[str(_grid.best_params_["svc__C"])],
-            mode="markers",
-            name="Best Params",
-            marker=dict(
-                color="#FACC15",
-                size=18,
-                symbol="star",
-                line=dict(width=1.6, color="#0F172A"),
-            ),
-        )
+    _fig_hm.add_shape(
+        type="rect",
+        x0=_best_c - 0.48,
+        x1=_best_c + 0.48,
+        y0=_best_r - 0.48,
+        y1=_best_r + 0.48,
+        line=dict(color="#0F172A", width=3),
     )
     _fig_hm.update_xaxes(title_text="svc__gamma", type="category")
     _fig_hm.update_yaxes(title_text="svc__C", type="category")

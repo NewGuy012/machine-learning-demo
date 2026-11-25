@@ -530,32 +530,37 @@ def _(go, make_subplots, mo, run_validation_and_grid, vc_est, vc_folds):
 
     _c_lbls = [f"{c:g}" for c in _c_vals]
     _g_lbls = [f"{g:g}" for g in _g_vals]
+    _best_r = _c_vals.index(_best_params["svc__C"])
+    _best_c = _g_vals.index(_best_params["svc__gamma"])
+    _hm_text = [
+        [
+            f"<b>★ {_grid_scores[r, c]:.3f}</b>"
+            if (r == _best_r and c == _best_c)
+            else f"{_grid_scores[r, c]:.3f}"
+            for c in range(len(_g_vals))
+        ]
+        for r in range(len(_c_vals))
+    ]
     _fig.add_trace(
         go.Heatmap(
             z=_grid_scores,
             x=_g_lbls,
             y=_c_lbls,
             colorscale="Viridis",
-            text=[[f"{v:.3f}" for v in row] for row in _grid_scores],
+            text=_hm_text,
             texttemplate="%{text}",
             colorbar=dict(title="Mean CV"),
         ),
         row=1,
         col=2,
     )
-    _fig.add_trace(
-        go.Scatter(
-            x=[f"{_best_params['svc__gamma']:g}"],
-            y=[f"{_best_params['svc__C']:g}"],
-            mode="markers",
-            name="Best Grid Point",
-            marker=dict(
-                color="#FACC15",
-                size=16,
-                symbol="star",
-                line=dict(width=1.5, color="#0F172A"),
-            ),
-        ),
+    _fig.add_shape(
+        type="rect",
+        x0=_best_c - 0.48,
+        x1=_best_c + 0.48,
+        y0=_best_r - 0.48,
+        y1=_best_r + 0.48,
+        line=dict(color="#0F172A", width=3),
         row=1,
         col=2,
     )
