@@ -3,7 +3,6 @@
 # dependencies = [
 #     "marimo",
 #     "numpy",
-#     "pandas",
 #     "plotly",
 #     "scikit-learn",
 #     "scipy",
@@ -15,14 +14,11 @@ import marimo
 __generated_with = "0.26.0"
 app = marimo.App(width="medium", app_title="02 · Unsupervised Learning")
 
-
-@app.cell
-def _():
+with app.setup:
     import functools
 
     import marimo as mo
     import numpy as np
-    import pandas as pd
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from scipy.cluster.hierarchy import dendrogram, linkage
@@ -52,36 +48,141 @@ def _():
         "#4F46E5",
         "#16A34A",
     ]
-    return (
-        AgglomerativeClustering,
-        DBSCAN,
-        KMeans,
-        NMF,
-        PALETTE,
-        PCA,
-        StandardScaler,
-        TSNE,
-        adjusted_rand_score,
-        dendrogram,
-        functools,
-        go,
-        linkage,
-        load_breast_cancer,
-        load_digits,
-        make_blobs,
-        make_circles,
-        make_moons,
-        make_subplots,
-        mo,
-        np,
-        pd,
-        silhouette_score,
-        train_test_split,
+
+
+@app.function
+def get_cluster_dataset(name: str, noise: float = 0.06, n_samples: int = 240):
+    """Return (X, y_true_for_reference) for clustering labs."""
+    if name == "Moons":
+        return make_moons(n_samples=n_samples, noise=noise, random_state=0)
+    if name == "Circles":
+        return make_circles(n_samples=n_samples, noise=noise * 0.75, factor=0.45, random_state=0)
+    if name == "Anisotropic Blobs":
+        X, y = make_blobs(n_samples=n_samples, centers=3, random_state=170)
+        return X @ np.array([[0.6, -0.6], [-0.4, 0.8]]), y
+    if name == "Varied Density Blobs":
+        return make_blobs(
+            n_samples=n_samples,
+            centers=[[-4, -2], [0, 3], [4, -1]],
+            cluster_std=[0.45, 1.35, 0.65],
+            random_state=42,
+        )
+    return make_blobs(
+        n_samples=n_samples,
+        centers=4,
+        cluster_std=0.65 + noise * 3.0,
+        random_state=42,
     )
 
 
+@app.function
+def style_fig(fig, title: str, height: int = 440):
+    fig.update_layout(
+        template="plotly_white",
+        title={"text": title, "font": {"size": 15}},
+        height=height,
+        margin={"l": 55, "r": 25, "t": 60, "b": 50},
+        paper_bgcolor="white",
+        plot_bgcolor="#F8FAFC",
+        font={"color": "#0F172A"},
+    )
+    return fig
+
+
+@app.function
+def hide_image_axes(fig, n_cols: int):
+    for col in range(1, n_cols + 1):
+        fig.update_yaxes(autorange="reversed", showticklabels=False, row=1, col=col)
+        fig.update_xaxes(showticklabels=False, row=1, col=col)
+
+
+@app.function
+def safe_silhouette(X: np.ndarray, labels: np.ndarray) -> float | None:
+    """Compute silhouette score on non-noise points when at least 2 clusters exist."""
+    valid = labels != -1
+    n_valid = int(valid.sum())
+    n_clusters = len(set(labels[valid]))
+    if 2 <= n_clusters < n_valid:
+        return float(silhouette_score(X[valid], labels[valid]))
+    return None
+
+
+@app.function
+@functools.lru_cache(maxsize=1)
+def get_digits_subset():
+    digits = load_digits()
+    X_sub, _, y_sub, _ = train_test_split(
+        digits.data,
+        digits.target,
+        train_size=400,
+        stratify=digits.target,
+        random_state=42,
+    )
+    return X_sub / 16.0, y_sub
+
+
+@app.function
+@functools.lru_cache(maxsize=8)
+def fit_pca_nmf(n_comp: int):
+    X, _ = get_digits_subset()
+    pca = PCA(n_components=n_comp, random_state=42).fit(X)
+    nmf = NMF(n_components=n_comp, init="nndsvda", max_iter=800, random_state=42).fit(X)
+    return pca, nmf
+
+
+@app.function
+@functools.lru_cache(maxsize=8)
+def fit_tsne_and_pca(perplexity: int):
+    X, y = get_digits_subset()
+    Xs = StandardScaler().fit_transform(X)
+    X_pca = PCA(n_components=2, random_state=42).fit_transform(Xs)
+    X_tsne = TSNE(
+        n_components=2, perplexity=float(perplexity), init="pca", random_state=42
+    ).fit_transform(Xs)
+    return X_pca, X_tsne, y
+
+
+@app.function
+def tile_components(components: np.ndarray) -> np.ndarray:
+    """Tile flattened 8x8 components into a square grid separated by NaN borders."""
+    side = int(np.ceil(np.sqrt(len(components))))
+    canvas = np.full((side * 9 - 1, side * 9 - 1), np.nan)
+    for idx, comp in enumerate(components):
+        r, c = divmod(idx, side)
+        canvas[r * 9 : r * 9 + 8, c * 9 : c * 9 + 8] = comp.reshape(8, 8)
+    return canvas
+
+
+@app.function
+@functools.lru_cache(maxsize=8)
+def get_scaled_showdown_data(dataset: str):
+    X, y_ref = get_cluster_dataset(dataset, noise=0.06, n_samples=210)
+    return StandardScaler().fit_transform(X), y_ref
+
+
+@app.function
+@functools.lru_cache(maxsize=8)
+def kmeans_elbow_sweep(dataset: str):
+    Xs, _ = get_scaled_showdown_data(dataset)
+    ks = list(range(2, 10))
+    inertias, sils = [], []
+    for kv in ks:
+        km = KMeans(n_clusters=kv, n_init="auto", random_state=42).fit(Xs)
+        inertias.append(float(km.inertia_))
+        sils.append(float(silhouette_score(Xs, km.labels_)))
+    return ks, inertias, sils
+
+
+@app.function
+@functools.lru_cache(maxsize=16)
+def compute_dendrogram(dataset: str, link: str):
+    Xs, _ = get_scaled_showdown_data(dataset)
+    Z = linkage(Xs, method=link)
+    return Z, dendrogram(Z, truncate_mode="lastp", p=20, no_plot=True)
+
+
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     # 02 · Unsupervised Learning: Transformations & Clustering
 
@@ -97,50 +198,7 @@ def _(mo):
 
 
 @app.cell
-def _(make_blobs, make_circles, make_moons, np):
-    def get_cluster_dataset(name: str, noise: float = 0.06, n_samples: int = 240):
-        """Return (X, y_true_for_reference) for clustering labs."""
-        if name == "Moons":
-            return make_moons(n_samples=n_samples, noise=noise, random_state=0)
-        if name == "Circles":
-            return make_circles(
-                n_samples=n_samples, noise=noise * 0.75, factor=0.45, random_state=0
-            )
-        if name == "Anisotropic Blobs":
-            _X, _y = make_blobs(n_samples=n_samples, centers=3, random_state=170)
-            _transform = np.array([[0.6, -0.6], [-0.4, 0.8]])
-            return _X @ _transform, _y
-        if name == "Varied Density Blobs":
-            return make_blobs(
-                n_samples=n_samples,
-                centers=[[-4, -2], [0, 3], [4, -1]],
-                cluster_std=[0.45, 1.35, 0.65],
-                random_state=42,
-            )
-        return make_blobs(
-            n_samples=n_samples,
-            centers=4,
-            cluster_std=0.65 + noise * 3.0,
-            random_state=42,
-        )
-
-    def style_fig(fig, title: str, height: int = 440):
-        fig.update_layout(
-            template="plotly_white",
-            title=dict(text=title, font=dict(size=15)),
-            height=height,
-            margin=dict(l=55, r=25, t=60, b=50),
-            paper_bgcolor="white",
-            plot_bgcolor="#F8FAFC",
-            font=dict(color="#0F172A"),
-        )
-        return fig
-
-    return get_cluster_dataset, style_fig
-
-
-@app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 1 · Principal Component Analysis (PCA) Deep Dive (`Breast Cancer`)
@@ -152,7 +210,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     pca_scale = mo.ui.switch(value=True, label="Apply StandardScaler (Recommended)")
     pca_dim = mo.ui.radio(
         options=["2D (PC1 vs PC2)", "3D (PC1 vs PC2 vs PC3)"],
@@ -178,20 +236,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    PALETTE,
-    PCA,
-    StandardScaler,
-    go,
-    load_breast_cancer,
-    make_subplots,
-    mo,
-    np,
-    pca_dim,
-    pca_n_scree,
-    pca_scale,
-    style_fig,
-):
+def _(pca_dim, pca_n_scree, pca_scale):
     _cancer = load_breast_cancer()
     _X_in = StandardScaler().fit_transform(_cancer.data) if pca_scale.value else _cancer.data
     _n_scree = int(pca_n_scree.value)
@@ -201,11 +246,11 @@ def _(
     _ratios = _pca_full.explained_variance_ratio_
     _cum = np.cumsum(_ratios)
 
-    # Scatter plot (2D or 3D)
+    _is_3d = pca_dim.value.startswith("3D")
     _scatter_fig = go.Figure()
     for _cls_idx, _cls_name in enumerate(_cancer.target_names):
         _mask = _cancer.target == _cls_idx
-        if pca_dim.value.startswith("3D"):
+        if _is_3d:
             _scatter_fig.add_trace(
                 go.Scatter3d(
                     x=_X_proj[_mask, 0],
@@ -213,7 +258,7 @@ def _(
                     z=_X_proj[_mask, 2],
                     mode="markers",
                     name=str(_cls_name),
-                    marker=dict(color=PALETTE[_cls_idx], size=4.5, opacity=0.82),
+                    marker={"color": PALETTE[_cls_idx], "size": 4.5, "opacity": 0.82},
                 )
             )
         else:
@@ -223,22 +268,22 @@ def _(
                     y=_X_proj[_mask, 1],
                     mode="markers",
                     name=str(_cls_name),
-                    marker=dict(
-                        color=PALETTE[_cls_idx],
-                        size=7,
-                        opacity=0.82,
-                        line=dict(width=0.6, color="white"),
-                    ),
+                    marker={
+                        "color": PALETTE[_cls_idx],
+                        "size": 7,
+                        "opacity": 0.82,
+                        "line": {"width": 0.6, "color": "white"},
+                    },
                 )
             )
 
-    if pca_dim.value.startswith("3D"):
+    if _is_3d:
         _scatter_fig.update_layout(
-            scene=dict(
-                xaxis_title=f"PC1 ({_ratios[0]:.1%})",
-                yaxis_title=f"PC2 ({_ratios[1]:.1%})",
-                zaxis_title=f"PC3 ({_ratios[2]:.1%})",
-            )
+            scene={
+                "xaxis_title": f"PC1 ({_ratios[0]:.1%})",
+                "yaxis_title": f"PC2 ({_ratios[1]:.1%})",
+                "zaxis_title": f"PC3 ({_ratios[2]:.1%})",
+            }
         )
     else:
         _scatter_fig.update_xaxes(title_text=f"First Principal Component ({_ratios[0]:.1%} var)")
@@ -250,7 +295,6 @@ def _(
         height=440,
     )
 
-    # Scree + Top Loadings Heatmap
     _diag_fig = make_subplots(
         rows=1,
         cols=2,
@@ -263,12 +307,7 @@ def _(
     )
     _pc_labels = [f"PC{i}" for i in range(1, _n_scree + 1)]
     _diag_fig.add_trace(
-        go.Bar(
-            x=_pc_labels,
-            y=_ratios * 100,
-            name="Individual %",
-            marker_color="#2563EB",
-        ),
+        go.Bar(x=_pc_labels, y=_ratios * 100, name="Individual %", marker_color="#2563EB"),
         row=1,
         col=1,
     )
@@ -278,7 +317,7 @@ def _(
             y=_cum * 100,
             mode="lines+markers",
             name="Cumulative %",
-            line=dict(color="#EA580C", width=2.5),
+            line={"color": "#EA580C", "width": 2.5},
         ),
         row=1,
         col=1,
@@ -294,7 +333,7 @@ def _(
             y=[_cancer.feature_names[i] for i in _top_feat_idx],
             colorscale="RdBu_r",
             zmid=0,
-            colorbar=dict(title="Loading", x=1.02),
+            colorbar={"title": "Loading", "x": 1.02},
         ),
         row=1,
         col=2,
@@ -334,7 +373,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 2 · NMF & t-SNE Showdown (`Handwritten Digits`)
@@ -346,58 +385,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    NMF,
-    PCA,
-    StandardScaler,
-    TSNE,
-    functools,
-    load_digits,
-    mo,
-    np,
-    train_test_split,
-):
-    @functools.lru_cache(maxsize=1)
-    def get_digits_subset():
-        _digits = load_digits()
-        # Stratified 400-sample subset keeps NMF and t-SNE crisp & responsive in browser WASM
-        _X_sub, _, _y_sub, _ = train_test_split(
-            _digits.data,
-            _digits.target,
-            train_size=400,
-            stratify=_digits.target,
-            random_state=42,
-        )
-        return _X_sub / 16.0, _y_sub
-
-    @functools.lru_cache(maxsize=8)
-    def fit_pca_nmf(n_comp: int):
-        _X, _ = get_digits_subset()
-        _pca = PCA(n_components=n_comp, random_state=42).fit(_X)
-        _nmf = NMF(n_components=n_comp, init="nndsvda", max_iter=800, random_state=42).fit(_X)
-        return _pca, _nmf
-
-    @functools.lru_cache(maxsize=8)
-    def fit_tsne_and_pca(perplexity: int):
-        _X, _y = get_digits_subset()
-        _Xs = StandardScaler().fit_transform(_X)
-        _X_pca = PCA(n_components=2, random_state=42).fit_transform(_Xs)
-        _X_tsne = TSNE(
-            n_components=2, perplexity=float(perplexity), init="pca", random_state=42
-        ).fit_transform(_Xs)
-        return _X_pca, _X_tsne, _y
-
-    def tile_components(components: np.ndarray) -> np.ndarray:
-        """Tile K flattened 8x8 components into a square matrix with NaN borders."""
-        _k = len(components)
-        _side = int(np.ceil(np.sqrt(_k)))
-        _canvas = np.full((_side * 9 - 1, _side * 9 - 1), np.nan)
-        for _idx, _comp in enumerate(components):
-            _r = _idx // _side
-            _c = _idx % _side
-            _canvas[_r * 9 : _r * 9 + 8, _c * 9 : _c * 9 + 8] = _comp.reshape(8, 8)
-        return _canvas
-
+def _():
     nmf_n_comp = mo.ui.radio(
         options={"4 (2×2)": 4, "9 (3×3)": 9, "16 (4×4)": 16, "25 (5×5)": 25},
         value="16 (4×4)",
@@ -426,33 +414,11 @@ def _(
         ),
         kind="info",
     )
-    return (
-        fit_pca_nmf,
-        fit_tsne_and_pca,
-        get_digits_subset,
-        nmf_n_comp,
-        nmf_sample_idx,
-        tile_components,
-        tsne_perplexity,
-    )
+    return nmf_n_comp, nmf_sample_idx, tsne_perplexity
 
 
 @app.cell
-def _(
-    PALETTE,
-    fit_pca_nmf,
-    fit_tsne_and_pca,
-    get_digits_subset,
-    go,
-    make_subplots,
-    mo,
-    nmf_n_comp,
-    nmf_sample_idx,
-    np,
-    style_fig,
-    tile_components,
-    tsne_perplexity,
-):
+def _(nmf_n_comp, nmf_sample_idx, tsne_perplexity):
     _k = int(nmf_n_comp.value)
     _idx = int(nmf_sample_idx.value)
     _X_sub, _y_sub = get_digits_subset()
@@ -474,26 +440,17 @@ def _(
     )
     _fig_parts.add_trace(
         go.Heatmap(
-            z=tile_components(_pca.components_),
-            colorscale="RdBu_r",
-            zmid=0,
-            showscale=False,
+            z=tile_components(_pca.components_), colorscale="RdBu_r", zmid=0, showscale=False
         ),
         row=1,
         col=1,
     )
     _fig_parts.add_trace(
-        go.Heatmap(
-            z=tile_components(_nmf.components_),
-            colorscale="Blues",
-            showscale=False,
-        ),
+        go.Heatmap(z=tile_components(_nmf.components_), colorscale="Blues", showscale=False),
         row=1,
         col=2,
     )
-    for _c in (1, 2):
-        _fig_parts.update_yaxes(autorange="reversed", showticklabels=False, row=1, col=_c)
-        _fig_parts.update_xaxes(showticklabels=False, row=1, col=_c)
+    hide_image_axes(_fig_parts, 2)
     style_fig(
         _fig_parts,
         "Learned Basis Components: Signed Orthogonal (PCA) vs. Parts-Based (NMF)",
@@ -521,11 +478,9 @@ def _(
             row=1,
             col=_col,
         )
-        _fig_rec.update_yaxes(autorange="reversed", showticklabels=False, row=1, col=_col)
-        _fig_rec.update_xaxes(showticklabels=False, row=1, col=_col)
+    hide_image_axes(_fig_rec, 3)
     style_fig(_fig_rec, f"Digit Reconstruction Quality with {_k} Components", height=270)
 
-    # PCA vs t-SNE 2D Manifold comparison
     _perp = int(tsne_perplexity.value)
     _X_pca2, _X_tsne2, _y_m = fit_tsne_and_pca(_perp)
     _fig_man = make_subplots(
@@ -539,31 +494,20 @@ def _(
     )
     for _d in range(10):
         _mask = _y_m == _d
-        _fig_man.add_trace(
-            go.Scatter(
-                x=_X_pca2[_mask, 0],
-                y=_X_pca2[_mask, 1],
-                mode="markers",
-                name=f"Digit {_d}",
-                legendgroup=str(_d),
-                marker=dict(color=PALETTE[_d], size=6, opacity=0.85),
-            ),
-            row=1,
-            col=1,
-        )
-        _fig_man.add_trace(
-            go.Scatter(
-                x=_X_tsne2[_mask, 0],
-                y=_X_tsne2[_mask, 1],
-                mode="markers",
-                name=f"Digit {_d}",
-                legendgroup=str(_d),
-                showlegend=False,
-                marker=dict(color=PALETTE[_d], size=6, opacity=0.85),
-            ),
-            row=1,
-            col=2,
-        )
+        for _col, _emb in ((1, _X_pca2), (2, _X_tsne2)):
+            _fig_man.add_trace(
+                go.Scatter(
+                    x=_emb[_mask, 0],
+                    y=_emb[_mask, 1],
+                    mode="markers",
+                    name=f"Digit {_d}",
+                    legendgroup=str(_d),
+                    showlegend=(_col == 1),
+                    marker={"color": PALETTE[_d], "size": 6, "opacity": 0.85},
+                ),
+                row=1,
+                col=_col,
+            )
     style_fig(
         _fig_man,
         "Linear Projection (PCA) vs. Local Manifold Embedding (t-SNE) on Digits",
@@ -587,7 +531,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 3 · DBSCAN Density Clustering Playground (`make_moons` & More)
@@ -600,7 +544,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     db_dataset = mo.ui.dropdown(
         options=["Moons", "Circles", "Anisotropic Blobs", "Varied Density Blobs"],
         value="Moons",
@@ -636,22 +580,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    DBSCAN,
-    PALETTE,
-    StandardScaler,
-    db_dataset,
-    db_eps,
-    db_min_samples,
-    db_noise,
-    db_scale,
-    get_cluster_dataset,
-    go,
-    mo,
-    np,
-    silhouette_score,
-    style_fig,
-):
+def _(db_dataset, db_eps, db_min_samples, db_noise, db_scale):
     _X, _ = get_cluster_dataset(db_dataset.value, noise=float(db_noise.value), n_samples=220)
     _X_in = StandardScaler().fit_transform(_X) if db_scale.value else _X
 
@@ -668,12 +597,8 @@ def _(
     _unique_clusters = sorted(c for c in set(_labels) if c != -1)
     _n_clusters = len(_unique_clusters)
     _noise_pct = float(np.mean(_noise_mask))
-
-    _non_noise = ~_noise_mask
-    if len(set(_labels[_non_noise])) >= 2:
-        _sil = f"{silhouette_score(_X_in[_non_noise], _labels[_non_noise]):.3f}"
-    else:
-        _sil = "N/A (<2 clusters)"
+    _sil_val = safe_silhouette(_X_in, _labels)
+    _sil = f"{_sil_val:.3f}" if _sil_val is not None else "N/A (<2 clusters)"
 
     _fig = go.Figure()
     for _ci in _unique_clusters:
@@ -687,7 +612,7 @@ def _(
                     y=_X_in[_cm, 1],
                     mode="markers",
                     name=f"Cluster {_ci} (Core)",
-                    marker=dict(color=_color, size=10, line=dict(width=1, color="white")),
+                    marker={"color": _color, "size": 10, "line": {"width": 1, "color": "white"}},
                 )
             )
         if np.any(_bm):
@@ -697,12 +622,12 @@ def _(
                     y=_X_in[_bm, 1],
                     mode="markers",
                     name=f"Cluster {_ci} (Border)",
-                    marker=dict(
-                        color=_color,
-                        size=7,
-                        symbol="diamond-open",
-                        line=dict(width=1.8, color=_color),
-                    ),
+                    marker={
+                        "color": _color,
+                        "size": 7,
+                        "symbol": "diamond-open",
+                        "line": {"width": 1.8, "color": _color},
+                    },
                 )
             )
 
@@ -713,7 +638,7 @@ def _(
                 y=_X_in[_noise_mask, 1],
                 mode="markers",
                 name="Noise (-1)",
-                marker=dict(color="#475569", size=9, symbol="x"),
+                marker={"color": "#475569", "size": 9, "symbol": "x"},
             )
         )
 
@@ -763,7 +688,7 @@ def _(
 
 
 @app.cell
-def _(mo):
+def _():
     mo.md("""
     ---
     ## Lab 4 · Clustering Showdown: `k-Means` vs. `Agglomerative` vs. `DBSCAN`
@@ -776,7 +701,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _():
     cmp_dataset = mo.ui.dropdown(
         options=[
             "Moons",
@@ -817,29 +742,8 @@ def _(mo):
 
 
 @app.cell
-def _(
-    AgglomerativeClustering,
-    DBSCAN,
-    KMeans,
-    PALETTE,
-    StandardScaler,
-    adjusted_rand_score,
-    cmp_dataset,
-    cmp_eps,
-    cmp_k,
-    cmp_linkage,
-    dendrogram,
-    get_cluster_dataset,
-    go,
-    linkage,
-    make_subplots,
-    mo,
-    np,
-    silhouette_score,
-    style_fig,
-):
-    _X, _y_ref = get_cluster_dataset(cmp_dataset.value, noise=0.06, n_samples=210)
-    _Xs = StandardScaler().fit_transform(_X)
+def _(cmp_dataset, cmp_eps, cmp_k, cmp_linkage):
+    _Xs, _y_ref = get_scaled_showdown_data(cmp_dataset.value)
     _k = int(cmp_k.value)
     _link = cmp_linkage.value
     _eps = float(cmp_eps.value)
@@ -851,12 +755,12 @@ def _(
 
     def _score_str(labels: np.ndarray) -> str:
         _ari = adjusted_rand_score(_y_ref, labels)
-        _valid = labels != -1
-        if len(set(labels[_valid])) >= 2:
-            _sil = f"{silhouette_score(_Xs[_valid], labels[_valid]):.2f}"
-        else:
-            _sil = "N/A"
-        return f"ARI vs true: {_ari:.2f} · Sil: {_sil}"
+        _sil = safe_silhouette(_Xs, labels)
+        return (
+            f"ARI vs true: {_ari:.2f} · Sil: {_sil:.2f}"
+            if _sil is not None
+            else f"ARI vs true: {_ari:.2f} · Sil: N/A"
+        )
 
     _titles = [
         f"k-Means (k={_k})<br><sup>{_score_str(_y_km)}</sup>",
@@ -877,11 +781,11 @@ def _(
                     mode="markers",
                     showlegend=False,
                     name=f"Cluster {_cid}",
-                    marker=dict(
-                        color="#64748B" if _cid == -1 else PALETTE[_cid % len(PALETTE)],
-                        size=7,
-                        symbol="x" if _cid == -1 else "circle",
-                    ),
+                    marker={
+                        "color": "#64748B" if _cid == -1 else PALETTE[_cid % len(PALETTE)],
+                        "size": 7,
+                        "symbol": "x" if _cid == -1 else "circle",
+                    },
                 ),
                 row=1,
                 col=_col,
@@ -894,12 +798,12 @@ def _(
                     mode="markers",
                     showlegend=False,
                     name="Centroids",
-                    marker=dict(
-                        color="#0F172A",
-                        size=13,
-                        symbol="star",
-                        line=dict(width=1.5, color="white"),
-                    ),
+                    marker={
+                        "color": "#0F172A",
+                        "size": 13,
+                        "symbol": "star",
+                        "line": {"width": 1.5, "color": "white"},
+                    },
                 ),
                 row=1,
                 col=_col,
@@ -908,20 +812,9 @@ def _(
     _fig.update_yaxes(title_text="Scaled F1", row=1, col=1)
     style_fig(_fig, f"Clustering Comparison on {cmp_dataset.value}", height=410)
 
-    # Diagnostics: k-Means Elbow + Silhouette (left) & Agglomerative Dendrogram (right)
-    _ks = list(range(2, 10))
-    _inertias, _sils = [], []
-    for _kv in _ks:
-        _km_tmp = KMeans(n_clusters=_kv, n_init="auto", random_state=42).fit(_Xs)
-        _inertias.append(float(_km_tmp.inertia_))
-        _sils.append(float(silhouette_score(_Xs, _km_tmp.labels_)))
-
-    _Z = linkage(_Xs, method=_link)
-    _dendro = dendrogram(_Z, truncate_mode="lastp", p=20, no_plot=True)
-    # Approximate horizontal cut height halfway between (k-1)th and kth last merge
-    _cut_y = (
-        0.5 * (_Z[-_k, 2] + _Z[-(_k - 1), 2]) if _k >= 2 and _k <= len(_Z) else float(_Z[-1, 2])
-    )
+    _ks, _inertias, _sils = kmeans_elbow_sweep(cmp_dataset.value)
+    _Z, _dendro = compute_dendrogram(cmp_dataset.value, _link)
+    _cut_y = 0.5 * (_Z[-_k, 2] + _Z[-(_k - 1), 2]) if 2 <= _k <= len(_Z) else float(_Z[-1, 2])
 
     _diag = make_subplots(
         rows=1,
@@ -939,7 +832,7 @@ def _(
             y=_inertias,
             mode="lines+markers",
             name="Inertia (Elbow)",
-            line=dict(color="#2563EB", width=2.5),
+            line={"color": "#2563EB", "width": 2.5},
         ),
         row=1,
         col=1,
@@ -951,7 +844,7 @@ def _(
             y=_sils,
             mode="lines+markers",
             name="Silhouette Score",
-            line=dict(color="#EA580C", width=2.5, dash="dash"),
+            line={"color": "#EA580C", "width": 2.5, "dash": "dash"},
         ),
         row=1,
         col=1,
@@ -965,7 +858,7 @@ def _(
                 x=_xs,
                 y=_ys,
                 mode="lines",
-                line=dict(color="#2563EB", width=1.8),
+                line={"color": "#2563EB", "width": 1.8},
                 showlegend=False,
                 hoverinfo="skip",
             ),
@@ -993,66 +886,64 @@ def _(
 
 
 @app.cell
-def _(mo, pd):
-    mo.md(
-        """
-        ---
-        ## Reference · Unsupervised Learning Cheat Sheet
-        """
-    )
-    _df = pd.DataFrame(
+def _():
+    _rows = [
+        {
+            "Algorithm": "Principal Component Analysis (PCA)",
+            "Type": "Transformation",
+            "Scaling?": "Yes (Critical)",
+            "Strengths": "Fast linear compression, orthogonal components, exact variance accounting",
+            "Weaknesses": "Linear only; components can mix positive/negative features awkwardly",
+            "Key Hyperparameters": "n_components",
+        },
+        {
+            "Algorithm": "Non-Negative Matrix Factorization (NMF)",
+            "Type": "Transformation",
+            "Scaling?": "Non-negative input >= 0",
+            "Strengths": "Extracts additive, interpretable parts (strokes, topics, spectra)",
+            "Weaknesses": "Requires non-negative data, non-unique solution depending on init",
+            "Key Hyperparameters": "n_components, init, alpha_W",
+        },
+        {
+            "Algorithm": "t-SNE",
+            "Type": "Manifold Viz",
+            "Scaling?": "Yes",
+            "Strengths": "Reveals nonlinear local clusters dramatically well in 2D",
+            "Weaknesses": "Slow on large N, no .transform(), global distances distorted",
+            "Key Hyperparameters": "perplexity, learning_rate",
+        },
+        {
+            "Algorithm": "k-Means Clustering",
+            "Type": "Clustering",
+            "Scaling?": "Yes",
+            "Strengths": "Fast, scales to huge datasets, exposes clean cluster centroids",
+            "Weaknesses": "Assumes convex equal-variance blobs; requires choosing k",
+            "Key Hyperparameters": "n_clusters",
+        },
+        {
+            "Algorithm": "Agglomerative Clustering",
+            "Type": "Clustering",
+            "Scaling?": "Yes",
+            "Strengths": "Builds full hierarchy (dendrogram), flexible linkage shapes",
+            "Weaknesses": "O(N²) memory/compute on large N; no .predict() for unseen points",
+            "Key Hyperparameters": "n_clusters, linkage (ward/complete/average/single)",
+        },
+        {
+            "Algorithm": "DBSCAN",
+            "Type": "Clustering",
+            "Scaling?": "Yes",
+            "Strengths": "Finds arbitrary non-convex shapes, auto-detects k, flags noise (-1)",
+            "Weaknesses": "Struggles with varying cluster densities; sensitive to eps",
+            "Key Hyperparameters": "eps, min_samples",
+        },
+    ]
+    mo.vstack(
         [
-            {
-                "Algorithm": "Principal Component Analysis (PCA)",
-                "Type": "Transformation",
-                "Scaling?": "Yes (Critical)",
-                "Strengths": "Fast linear compression, orthogonal components, exact variance accounting",
-                "Weaknesses": "Linear only; components can mix positive/negative features awkwardly",
-                "Key Hyperparameters": "n_components",
-            },
-            {
-                "Algorithm": "Non-Negative Matrix Factorization (NMF)",
-                "Type": "Transformation",
-                "Scaling?": "Non-negative input >= 0",
-                "Strengths": "Extracts additive, interpretable parts (strokes, topics, spectra)",
-                "Weaknesses": "Requires non-negative data, non-unique solution depending on init",
-                "Key Hyperparameters": "n_components, init, alpha_W",
-            },
-            {
-                "Algorithm": "t-SNE",
-                "Type": "Manifold Viz",
-                "Scaling?": "Yes",
-                "Strengths": "Reveals nonlinear local clusters dramatically well in 2D",
-                "Weaknesses": "Slow on large N, no .transform(), global distances distorted",
-                "Key Hyperparameters": "perplexity, learning_rate",
-            },
-            {
-                "Algorithm": "k-Means Clustering",
-                "Type": "Clustering",
-                "Scaling?": "Yes",
-                "Strengths": "Fast, scales to huge datasets, exposes clean cluster centroids",
-                "Weaknesses": "Assumes convex equal-variance blobs; requires choosing k",
-                "Key Hyperparameters": "n_clusters",
-            },
-            {
-                "Algorithm": "Agglomerative Clustering",
-                "Type": "Clustering",
-                "Scaling?": "Yes",
-                "Strengths": "Builds full hierarchy (dendrogram), flexible linkage shapes",
-                "Weaknesses": "O(N²) memory/compute on large N; no .predict() for unseen points",
-                "Key Hyperparameters": "n_clusters, linkage (ward/complete/average/single)",
-            },
-            {
-                "Algorithm": "DBSCAN",
-                "Type": "Clustering",
-                "Scaling?": "Yes",
-                "Strengths": "Finds arbitrary non-convex shapes, auto-detects k, flags noise (-1)",
-                "Weaknesses": "Struggles with varying cluster densities; sensitive to eps",
-                "Key Hyperparameters": "eps, min_samples",
-            },
-        ]
+            mo.md("---\n## Reference · Unsupervised Learning Cheat Sheet"),
+            mo.ui.table(_rows, selection=None, show_column_summaries=False),
+        ],
+        gap=0.5,
     )
-    mo.ui.table(_df, selection=None, show_column_summaries=False)
 
 
 if __name__ == "__main__":
