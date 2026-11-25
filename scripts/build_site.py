@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NOTEBOOKS_DIR = ROOT / "notebooks"
 SITE_DIR = ROOT / "_site"
+SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 
 NOTEBOOK_CATALOG = [
     {
@@ -59,153 +62,68 @@ INDEX_TEMPLATE = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none';" />
   <title>Machine Learning Demo · Interactive Marimo Labs</title>
   <style>
     :root {{
-      --bg: #f8fafc;
-      --card: #ffffff;
-      --text: #0f172a;
-      --muted: #475569;
-      --border: #e2e8f0;
-      --accent: #2563eb;
-      --accent-hover: #1d4ed8;
-      --tag-bg: #eff6ff;
-      --tag-text: #1e40af;
+      --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #475569;
+      --border: #e2e8f0; --accent: #2563eb; --accent-hover: #1d4ed8;
+      --tag-bg: #eff6ff; --tag-text: #1e40af;
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
-        --bg: #0b1120;
-        --card: #111827;
-        --text: #f1f5f9;
-        --muted: #94a3b8;
-        --border: #1e293b;
-        --accent: #3b82f6;
-        --accent-hover: #60a5fa;
-        --tag-bg: #1e293b;
-        --tag-text: #93c5fd;
+        --bg: #0b1120; --card: #111827; --text: #f1f5f9; --muted: #94a3b8;
+        --border: #1e293b; --accent: #3b82f6; --accent-hover: #60a5fa;
+        --tag-bg: #1e293b; --tag-text: #93c5fd;
       }}
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
+      background: var(--bg); color: var(--text); line-height: 1.6;
     }}
-    .container {{
-      max-width: 1040px;
-      margin: 0 auto;
-      padding: 3rem 1.5rem 4rem;
-    }}
-    header {{
-      margin-bottom: 2.5rem;
-    }}
+    .container {{ max-width: 1040px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }}
+    header {{ margin-bottom: 2.5rem; }}
     .eyebrow {{
-      display: inline-block;
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--accent);
+      display: inline-block; font-size: 0.78rem; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent);
       margin-bottom: 0.5rem;
     }}
-    h1 {{
-      margin: 0 0 0.75rem;
-      font-size: clamp(1.9rem, 3.2vw, 2.6rem);
-      line-height: 1.15;
-    }}
-    .lead {{
-      margin: 0;
-      max-width: 720px;
-      color: var(--muted);
-      font-size: 1.05rem;
-    }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1.25rem;
-    }}
+    h1 {{ margin: 0 0 0.75rem; font-size: clamp(1.9rem, 3.2vw, 2.6rem); line-height: 1.15; }}
+    .lead {{ margin: 0; max-width: 720px; color: var(--muted); font-size: 1.05rem; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; }}
     .card {{
-      display: flex;
-      flex-direction: column;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1.5rem;
+      display: flex; flex-direction: column; background: var(--card);
+      border: 1px solid var(--border); border-radius: 14px; padding: 1.5rem;
       transition: transform 150ms ease, border-color 150ms ease;
     }}
-    .card:hover {{
-      transform: translateY(-2px);
-      border-color: var(--accent);
-    }}
-    .subtitle {{
-      font-size: 0.82rem;
-      font-weight: 600;
-      color: var(--muted);
-      margin-bottom: 0.25rem;
-    }}
-    .card h2 {{
-      margin: 0 0 0.6rem;
-      font-size: 1.25rem;
-    }}
-    .card p {{
-      margin: 0 0 1.1rem;
-      color: var(--muted);
-      font-size: 0.94rem;
-      flex-grow: 1;
-    }}
-    .tags {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin-bottom: 1.2rem;
-    }}
+    .card:hover {{ transform: translateY(-2px); border-color: var(--accent); }}
+    .subtitle {{ font-size: 0.82rem; font-weight: 600; color: var(--muted); margin-bottom: 0.25rem; }}
+    .card h2 {{ margin: 0 0 0.6rem; font-size: 1.25rem; }}
+    .card p {{ margin: 0 0 1.1rem; color: var(--muted); font-size: 0.94rem; flex-grow: 1; }}
+    .tags {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }}
     .tag {{
-      background: var(--tag-bg);
-      color: var(--tag-text);
-      border-radius: 999px;
-      padding: 0.2rem 0.65rem;
-      font-size: 0.76rem;
-      font-weight: 600;
+      background: var(--tag-bg); color: var(--tag-text); border-radius: 999px;
+      padding: 0.2rem 0.65rem; font-size: 0.76rem; font-weight: 600;
     }}
     .btn {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--accent);
-      color: #ffffff;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 0.92rem;
-      padding: 0.65rem 1rem;
-      border-radius: 8px;
-      transition: background 150ms ease;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #ffffff; text-decoration: none;
+      font-weight: 600; font-size: 0.92rem; padding: 0.65rem 1rem;
+      border-radius: 8px; transition: background 150ms ease;
     }}
-    .btn:hover {{
-      background: var(--accent-hover);
-    }}
+    .btn:hover {{ background: var(--accent-hover); }}
     footer {{
-      margin-top: 2.75rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.88rem;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      gap: 0.75rem;
+      margin-top: 2.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 0.88rem; display: flex; flex-wrap: wrap;
+      justify-content: space-between; gap: 0.75rem;
     }}
-    footer a {{
-      color: var(--accent);
-      text-decoration: none;
-    }}
+    footer a {{ color: var(--accent); text-decoration: none; }}
     code {{
-      background: var(--tag-bg);
-      color: var(--tag-text);
-      padding: 0.15rem 0.4rem;
-      border-radius: 5px;
-      font-size: 0.84rem;
+      background: var(--tag-bg); color: var(--tag-text);
+      padding: 0.15rem 0.4rem; border-radius: 5px; font-size: 0.84rem;
     }}
   </style>
 </head>
@@ -243,18 +161,61 @@ CARD_TEMPLATE = """      <article class="card">
       </article>"""
 
 
+def validate_slug(slug: str) -> str:
+    if not SLUG_RE.fullmatch(slug):
+        raise ValueError(f"Invalid notebook slug: {slug!r}")
+    return slug
+
+
+def resolve_notebook_path(slug: str, notebooks_dir: Path = NOTEBOOKS_DIR) -> Path:
+    validate_slug(slug)
+    base = notebooks_dir.resolve()
+    nb_path = (base / f"{slug}.py").resolve()
+    if not nb_path.is_relative_to(base):
+        raise ValueError(f"Notebook path escapes notebooks dir: {nb_path}")
+    if not nb_path.is_file():
+        raise FileNotFoundError(f"Expected notebook not found: {nb_path}")
+    return nb_path
+
+
+def validate_catalog(catalog: list[dict[str, object]], notebooks_dir: Path = NOTEBOOKS_DIR) -> None:
+    slugs = [validate_slug(str(entry["slug"])) for entry in catalog]
+    if len(slugs) != len(set(slugs)):
+        raise ValueError("Duplicate slugs found in NOTEBOOK_CATALOG")
+    disk_slugs = {p.stem for p in notebooks_dir.glob("*.py")}
+    catalog_slugs = set(slugs)
+    if catalog_slugs != disk_slugs:
+        missing = sorted(disk_slugs - catalog_slugs)
+        extra = sorted(catalog_slugs - disk_slugs)
+        raise ValueError(f"Catalog/notebook drift detected (missing={missing}, extra={extra})")
+
+
+def render_card(entry: dict[str, object]) -> str:
+    slug = validate_slug(str(entry["slug"]))
+    tags = [str(t) for t in entry["tags"]]  # type: ignore[union-attr]
+    tags_html = "".join(f'<span class="tag">{html.escape(t, quote=True)}</span>' for t in tags)
+    return CARD_TEMPLATE.format(
+        slug=html.escape(slug, quote=True),
+        title=html.escape(str(entry["title"]), quote=True),
+        subtitle=html.escape(str(entry["subtitle"]), quote=True),
+        description=html.escape(str(entry["description"]), quote=True),
+        tags=tags_html,
+    )
+
+
+def render_index(catalog: list[dict[str, object]]) -> str:
+    return INDEX_TEMPLATE.format(cards="\n".join(render_card(entry) for entry in catalog))
+
+
 def build_site() -> None:
+    validate_catalog(NOTEBOOK_CATALOG, NOTEBOOKS_DIR)
     if SITE_DIR.exists():
         shutil.rmtree(SITE_DIR)
     SITE_DIR.mkdir(parents=True)
 
-    cards_html: list[str] = []
     for entry in NOTEBOOK_CATALOG:
-        slug = entry["slug"]
-        nb_path = NOTEBOOKS_DIR / f"{slug}.py"
-        if not nb_path.exists():
-            raise FileNotFoundError(f"Expected notebook not found: {nb_path}")
-
+        slug = validate_slug(str(entry["slug"]))
+        nb_path = resolve_notebook_path(slug, NOTEBOOKS_DIR)
         out_dir = SITE_DIR / slug
         cmd = [
             sys.executable,
@@ -272,23 +233,9 @@ def build_site() -> None:
             "-f",
         ]
         print(f"Exporting {nb_path.name} -> {out_dir} ...")
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)  # noqa: S603
 
-        tags_html = "".join(f'<span class="tag">{t}</span>' for t in entry["tags"])
-        cards_html.append(
-            CARD_TEMPLATE.format(
-                slug=slug,
-                title=entry["title"],
-                subtitle=entry["subtitle"],
-                description=entry["description"],
-                tags=tags_html,
-            )
-        )
-
-    (SITE_DIR / "index.html").write_text(
-        INDEX_TEMPLATE.format(cards="\n".join(cards_html)),
-        encoding="utf-8",
-    )
+    (SITE_DIR / "index.html").write_text(render_index(NOTEBOOK_CATALOG), encoding="utf-8")
     (SITE_DIR / ".nojekyll").touch()
     print(f"Static WASM site ready at: {SITE_DIR}")
 

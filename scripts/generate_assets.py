@@ -13,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
+    confusion_matrix,
     precision_recall_curve,
     roc_auc_score,
     roc_curve,
@@ -26,6 +27,12 @@ from sklearn.svm import SVC
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = ROOT / "assets"
 PALETTE = ["#2563EB", "#EA580C", "#059669", "#7C3AED"]
+STAR_MARKER = {
+    "color": "#FACC15",
+    "size": 14,
+    "symbol": "star",
+    "line": {"width": 1.5, "color": "#0F172A"},
+}
 
 
 def _rgba(hex_color: str, alpha: float) -> str:
@@ -34,16 +41,18 @@ def _rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r}, {g}, {b}, {alpha})"
 
 
-def _base_layout(fig: go.Figure, title: str, width: int = 980, height: int = 380) -> go.Figure:
+def _base_layout(
+    fig: go.Figure, title: str, width: int = 980, height: int = 380, top_margin: int = 68
+) -> go.Figure:
     fig.update_layout(
         template="plotly_white",
-        title=dict(text=title, font=dict(size=16, color="#0F172A")),
+        title={"text": title, "font": {"size": 16, "color": "#0F172A"}},
         width=width,
         height=height,
-        margin=dict(l=55, r=30, t=68, b=50),
+        margin={"l": 55, "r": 30, "t": top_margin, "b": 50},
         paper_bgcolor="white",
         plot_bgcolor="#F8FAFC",
-        font=dict(color="#0F172A", size=12),
+        font={"color": "#0F172A", "size": 12},
     )
     return fig
 
@@ -61,13 +70,9 @@ def build_supervised_preview() -> go.Figure:
     models = [
         ("k-NN (k=7)", make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=7))),
         ("RBF SVM (Scaled)", make_pipeline(StandardScaler(), SVC(kernel="rbf", C=1.0))),
-        (
-            "Random Forest",
-            RandomForestClassifier(n_estimators=50, max_depth=6, random_state=42),
-        ),
+        ("Random Forest", RandomForestClassifier(n_estimators=50, max_depth=6, random_state=42)),
     ]
-    titles = []
-    fitted = []
+    titles, fitted = [], []
     for name, m in models:
         m.fit(X_tr, y_tr)
         titles.append(f"{name}<br><sup>Test Accuracy: {m.score(X_te, y_te):.1%}</sup>")
@@ -91,14 +96,18 @@ def build_supervised_preview() -> go.Figure:
                     mode="markers",
                     name=f"Class {ci}",
                     showlegend=(col == 1),
-                    marker=dict(color=PALETTE[ci], size=7, line=dict(width=1, color="white")),
+                    marker={
+                        "color": PALETTE[ci],
+                        "size": 7,
+                        "line": {"width": 1, "color": "white"},
+                    },
                 ),
                 row=1,
                 col=col,
             )
-    fig = _base_layout(fig, "01 · Supervised Decision Boundaries on Nonlinear Moons", height=400)
-    fig.update_layout(margin=dict(l=55, r=30, t=86, b=50))
-    return fig
+    return _base_layout(
+        fig, "01 · Supervised Decision Boundaries on Nonlinear Moons", height=400, top_margin=86
+    )
 
 
 def build_clustering_preview() -> go.Figure:
@@ -106,7 +115,6 @@ def build_clustering_preview() -> go.Figure:
     Xs = StandardScaler().fit_transform(X)
 
     km = KMeans(n_clusters=2, n_init="auto", random_state=42).fit(Xs)
-    y_km = km.labels_
     y_agg = AgglomerativeClustering(n_clusters=2, linkage="ward").fit_predict(Xs)
     y_db = DBSCAN(eps=0.35, min_samples=5).fit_predict(Xs)
 
@@ -121,7 +129,7 @@ def build_clustering_preview() -> go.Figure:
         horizontal_spacing=0.06,
     )
     for col, (lbls, centers) in enumerate(
-        [(y_km, km.cluster_centers_), (y_agg, None), (y_db, None)], start=1
+        [(km.labels_, km.cluster_centers_), (y_agg, None), (y_db, None)], start=1
     ):
         for cid in sorted(set(lbls)):
             mask = lbls == cid
@@ -131,11 +139,11 @@ def build_clustering_preview() -> go.Figure:
                     y=Xs[mask, 1],
                     mode="markers",
                     showlegend=False,
-                    marker=dict(
-                        color="#64748B" if cid == -1 else PALETTE[cid % len(PALETTE)],
-                        size=7,
-                        symbol="x" if cid == -1 else "circle",
-                    ),
+                    marker={
+                        "color": "#64748B" if cid == -1 else PALETTE[cid % len(PALETTE)],
+                        "size": 7,
+                        "symbol": "x" if cid == -1 else "circle",
+                    },
                 ),
                 row=1,
                 col=col,
@@ -147,9 +155,12 @@ def build_clustering_preview() -> go.Figure:
                     y=centers[:, 1],
                     mode="markers",
                     showlegend=False,
-                    marker=dict(
-                        color="#0F172A", size=13, symbol="star", line=dict(width=1.5, color="white")
-                    ),
+                    marker={
+                        "color": "#0F172A",
+                        "size": 13,
+                        "symbol": "star",
+                        "line": {"width": 1.5, "color": "white"},
+                    },
                 ),
                 row=1,
                 col=col,
@@ -170,13 +181,10 @@ def build_evaluation_preview() -> go.Figure:
     pr_p, pr_r, _ = precision_recall_curve(y_te, probs)
     ap = average_precision_score(y_te, probs)
 
-    tp = int(np.sum((pred == 1) & (y_te == 1)))
-    fp = int(np.sum((pred == 1) & (y_te == 0)))
-    fn = int(np.sum((pred == 0) & (y_te == 1)))
-    tn = int(np.sum((pred == 0) & (y_te == 0)))
-    cur_fpr = fp / (fp + tn)
-    cur_rec = tp / (tp + fn)
-    cur_prec = tp / (tp + fp)
+    tn, fp, fn, tp = confusion_matrix(y_te, pred, labels=[0, 1]).ravel()
+    cur_fpr = fp / max(fp + tn, 1)
+    cur_rec = tp / max(tp + fn, 1)
+    cur_prec = tp / max(tp + fp, 1)
 
     fig = make_subplots(
         rows=1,
@@ -186,48 +194,38 @@ def build_evaluation_preview() -> go.Figure:
     )
     fig.add_trace(
         go.Scatter(
-            x=[0, 1], y=[0, 1], mode="lines", name="Random", line=dict(color="#94A3B8", dash="dash")
+            x=[0, 1],
+            y=[0, 1],
+            mode="lines",
+            name="Random",
+            line={"color": "#94A3B8", "dash": "dash"},
         ),
         row=1,
         col=1,
     )
     fig.add_trace(
         go.Scatter(
-            x=fpr, y=tpr, mode="lines", name="LogReg ROC", line=dict(color="#2563EB", width=3)
+            x=fpr, y=tpr, mode="lines", name="LogReg ROC", line={"color": "#2563EB", "width": 3}
         ),
         row=1,
         col=1,
     )
     fig.add_trace(
         go.Scatter(
-            x=[cur_fpr],
-            y=[cur_rec],
-            mode="markers",
-            name="Threshold = 0.50",
-            marker=dict(
-                color="#FACC15", size=14, symbol="star", line=dict(width=1.5, color="#0F172A")
-            ),
+            x=[cur_fpr], y=[cur_rec], mode="markers", name="Threshold = 0.50", marker=STAR_MARKER
         ),
         row=1,
         col=1,
     )
     fig.add_trace(
         go.Scatter(
-            x=pr_r, y=pr_p, mode="lines", name="LogReg PR", line=dict(color="#EA580C", width=3)
+            x=pr_r, y=pr_p, mode="lines", name="LogReg PR", line={"color": "#EA580C", "width": 3}
         ),
         row=1,
         col=2,
     )
     fig.add_trace(
-        go.Scatter(
-            x=[cur_rec],
-            y=[cur_prec],
-            mode="markers",
-            showlegend=False,
-            marker=dict(
-                color="#FACC15", size=14, symbol="star", line=dict(width=1.5, color="#0F172A")
-            ),
-        ),
+        go.Scatter(x=[cur_rec], y=[cur_prec], mode="markers", showlegend=False, marker=STAR_MARKER),
         row=1,
         col=2,
     )
@@ -263,8 +261,7 @@ def build_pipeline_preview() -> go.Figure:
         for r in range(len(c_vals))
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
+    fig = go.Figure(
         go.Heatmap(
             z=means,
             x=[str(g) for g in g_vals],
@@ -272,7 +269,7 @@ def build_pipeline_preview() -> go.Figure:
             colorscale="Viridis",
             text=text_mat,
             texttemplate="%{text}",
-            colorbar=dict(title="Mean CV"),
+            colorbar={"title": "Mean CV"},
         )
     )
     fig.add_shape(
@@ -281,7 +278,7 @@ def build_pipeline_preview() -> go.Figure:
         x1=best_c + 0.48,
         y0=best_r - 0.48,
         y1=best_r + 0.48,
-        line=dict(color="#0F172A", width=3),
+        line={"color": "#0F172A", "width": 3},
     )
     fig.update_xaxes(title_text="svc__gamma", type="category")
     fig.update_yaxes(title_text="svc__C", type="category")
