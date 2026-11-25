@@ -7,10 +7,10 @@
 Explore decision boundaries, dimensionality reduction, cross-validation pitfalls, and leak-free pipelines with live sliders and interactive charts—locally or directly in your browser with zero setup.
 
 [![Live WASM Demo](https://img.shields.io/badge/Live_Demo-GitHub_Pages-2563EB?style=for-the-badge&logo=webassembly&logoColor=white)](https://newguy012.github.io/machine-learning-demo/)
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.15+](https://img.shields.io/badge/Python-3.15+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![uv](https://img.shields.io/badge/uv-managed-DE5FE9?style=for-the-badge&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
 [![Marimo](https://img.shields.io/badge/Marimo-reactive_notebooks-16A34A?style=for-the-badge)](https://marimo.io/)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.6+-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.9+-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-64748B?style=for-the-badge)](LICENSE)
 
 [Launch Browser Labs](https://newguy012.github.io/machine-learning-demo/) · [Quick Start](#quick-start-with-uv) · [Notebook Catalog](#interactive-notebook-catalog) · [Algorithm Cheat Sheet](#ml-algorithm-cheat-sheet)
@@ -73,7 +73,7 @@ cd machine-learning-demo
 uv sync
 ```
 
-`uv` reads `.python-version` (`3.12`) and `uv.lock` to provision the exact environment automatically—no manual `venv` activation needed.
+`uv` reads `.python-version` (`3.15`) and `uv.lock` to provision the exact environment automatically—no manual `venv` activation needed.
 
 ### 2. Launch the notebooks
 
@@ -152,7 +152,7 @@ machine-learning-demo/
 ├── scripts/
 │   ├── build_site.py                    # Exports all notebooks via `marimo export html-wasm`
 │   └── generate_assets.py               # Regenerates static README visuals in assets/
-├── .python-version                      # Pins Python 3.12 for uv
+├── .python-version                      # Pins Python 3.15 for uv
 ├── pyproject.toml                       # Project dependencies, dev group & Ruff settings
 ├── uv.lock                              # Deterministic lockfile
 ├── LICENSE                              # BSD 3-Clause License

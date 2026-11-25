@@ -4,24 +4,24 @@ version = "0.2.0"
 description = "Interactive, visual machine learning demos built with Marimo, scikit-learn, and Plotly."
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
-requires-python = ">=3.11"
+requires-python = ">=3.15"
 dependencies = [
-    "marimo>=0.20.0",
-    "numpy>=2.0.0",
-    "pandas>=2.2.0",
-    "plotly>=5.24.0",
-    "scikit-learn>=1.6.0",
-    "scipy>=1.14.0",
+    "marimo>=0.26.0",
+    "numpy>=2.5.5",
+    "pandas>=3.1.1",
+    "plotly>=7.2.0",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
 ]
 
 [dependency-groups]
 dev = [
-    "kaleido>=0.2.1",
-    "ruff>=0.8.0",
+    "kaleido>=1.5.2",
+    "ruff>=0.17.6",
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py315"
 line-length = 100
 
 [tool.ruff.lint]
